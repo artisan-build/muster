@@ -27,36 +27,31 @@ final class EvaluateMonitorLateness extends SystemAuthorityCommand
             ->orderBy('id')
             ->chunkById(100, function ($monitors) use (&$transitionCount): void {
                 foreach ($monitors as $candidate) {
-                    $transitioned = DB::transaction(function () use ($candidate): bool {
+                    $transitionCount += DB::transaction(function () use ($candidate): int {
                         $monitor = Monitor::query()->lockForUpdate()->find($candidate->id);
 
                         if ($monitor === null || ! $monitor->is_enabled || $monitor->next_due_at === null) {
-                            return false;
+                            return 0;
                         }
 
                         $evaluatedAt = now();
+                        $transitions = 0;
 
                         if ($monitor->status === 'healthy' && $evaluatedAt->greaterThanOrEqualTo($monitor->next_due_at)) {
                             $monitor->forceFill(['status' => 'late'])->save();
                             $monitor->recordActivity([CheckInEvent::TYPE_LATE], $evaluatedAt);
-
-                            return true;
+                            $transitions++;
                         }
 
                         if ($monitor->status === 'late'
                             && $evaluatedAt->greaterThanOrEqualTo($monitor->next_due_at->addSeconds($monitor->grace_seconds))) {
                             $monitor->forceFill(['status' => 'missed'])->save();
                             $monitor->recordActivity([CheckInEvent::TYPE_MISSED], $evaluatedAt);
-
-                            return true;
+                            $transitions++;
                         }
 
-                        return false;
+                        return $transitions;
                     });
-
-                    if ($transitioned) {
-                        $transitionCount++;
-                    }
                 }
             });
 

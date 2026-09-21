@@ -99,6 +99,79 @@ it('keeps a healthy monitor healthy before its boundary then records one late tr
         ->and($event->occurred_at->toISOString())->toBe('2026-09-21T12:05:00.000000Z');
 });
 
+it('catches up through zero grace at the cadence boundary in one evaluator run', function (): void {
+    $monitor = createStateEngineMonitor([
+        'grace_seconds' => 0,
+        'status' => 'healthy',
+        'last_check_in_at' => '2026-09-21 12:00:00',
+        'next_due_at' => '2026-09-21 12:05:00',
+    ]);
+
+    $this->travelTo('2026-09-21 12:05:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 2 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    $events = $monitor->events()->orderBy('id')->get();
+
+    expect($monitor->refresh()->status)->toBe('missed')
+        ->and($events)->toHaveCount(2)
+        ->and($events->pluck('event_type')->all())->toBe([
+            CheckInEvent::TYPE_LATE,
+            CheckInEvent::TYPE_MISSED,
+        ])
+        ->and($events->pluck('occurred_at')->map->toISOString()->all())->toBe([
+            '2026-09-21T12:05:00.000000Z',
+            '2026-09-21T12:05:00.000000Z',
+        ]);
+
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 0 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    expect($monitor->refresh()->status)->toBe('missed')
+        ->and($monitor->events()->orderBy('id')->pluck('event_type')->all())->toBe([
+            CheckInEvent::TYPE_LATE,
+            CheckInEvent::TYPE_MISSED,
+        ]);
+});
+
+it('catches up a delayed healthy monitor through both expired thresholds in one run', function (): void {
+    $monitor = createStateEngineMonitor([
+        'status' => 'healthy',
+        'last_check_in_at' => '2026-09-21 12:00:00',
+        'next_due_at' => '2026-09-21 12:05:00',
+    ]);
+
+    $this->travelTo('2026-09-21 12:10:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 2 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    $events = $monitor->events()->orderBy('id')->get();
+
+    expect($monitor->refresh()->status)->toBe('missed')
+        ->and($events)->toHaveCount(2)
+        ->and($events->pluck('event_type')->all())->toBe([
+            CheckInEvent::TYPE_LATE,
+            CheckInEvent::TYPE_MISSED,
+        ])
+        ->and($events->pluck('occurred_at')->map->toISOString()->all())->toBe([
+            '2026-09-21T12:10:00.000000Z',
+            '2026-09-21T12:10:00.000000Z',
+        ]);
+
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 0 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    expect($monitor->refresh()->status)->toBe('missed')
+        ->and($monitor->events()->orderBy('id')->pluck('event_type')->all())->toBe([
+            CheckInEvent::TYPE_LATE,
+            CheckInEvent::TYPE_MISSED,
+        ]);
+});
+
 it('keeps a late monitor late through grace then records one missed transition', function (): void {
     $monitor = createStateEngineMonitor([
         'status' => 'late',
