@@ -75,7 +75,7 @@ namespace App\Models{
  * @property CarbonImmutable|null $next_due_at
  * @property \Carbon\CarbonImmutable|null $created_at
  * @property \Carbon\CarbonImmutable|null $updated_at
- * @property-read \App\Models\CredentialPartition|null $credentialPartition
+ * @property-read \App\Models\CredentialPartition $credentialPartition
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\CheckInEvent> $events
  * @property-read int|null $events_count
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor newModelQuery()

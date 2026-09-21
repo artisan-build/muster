@@ -21,7 +21,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $status
  * @property CarbonImmutable|null $last_check_in_at
  * @property CarbonImmutable|null $next_due_at
- *
  * @mixin IdeHelperMonitor
  */
 final class Monitor extends Model
@@ -70,7 +69,7 @@ final class Monitor extends Model
 
         /** @var Collection<int, CheckInEvent> $retainedEvents */
         $retainedEvents = $this->events()
-            ->orderByDesc('occurred_at')
+            ->latest('occurred_at')
             ->orderByDesc('id')
             ->limit(100)
             ->get(['id']);

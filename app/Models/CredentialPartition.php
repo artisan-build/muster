@@ -17,7 +17,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $installation_ref
  * @property string $application_ref
  * @property string $audience
- *
  * @mixin IdeHelperCredentialPartition
  */
 final class CredentialPartition extends Model

@@ -190,7 +190,7 @@ it('drives one monitor from healthy through missed recovery and two authenticate
     expect($monitor->events()->where('event_type', CheckInEvent::TYPE_RECOVERED)->count())->toBe(1)
         ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_CHECK_IN)->count())->toBe(2)
         ->and($monitor->events()
-            ->orderByDesc('occurred_at')
+            ->latest('occurred_at')
             ->orderByDesc('id')
             ->pluck('event_type')
             ->all())->toBe([
