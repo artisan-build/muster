@@ -165,13 +165,13 @@ it('enforces delivery uniqueness and serializes only an opaque identifier into t
     $delivery = createAlertDelivery(AlertDelivery::CHANNEL_WEBHOOK);
     $monitor = $delivery->event->monitor;
 
-    expect(fn () => DB::table('alert_deliveries')->insert([
+    expect(fn () => DB::transaction(fn () => DB::table('alert_deliveries')->insert([
         'check_in_event_id' => $delivery->check_in_event_id,
         'channel' => $delivery->channel,
         'destination' => 'duplicate',
         'created_at' => now(),
         'updated_at' => now(),
-    ]))->toThrow(UniqueConstraintViolationException::class);
+    ])))->toThrow(UniqueConstraintViolationException::class);
 
     $serialized = serialize(new DeliverTransitionAlert($delivery->id));
     $queue = Queue::connection('database');
