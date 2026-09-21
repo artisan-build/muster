@@ -23,10 +23,11 @@ from that bundle silently does nothing. To use new classes, delete the existing 
 
 ## Built For Cloud
 
-The canonical app manifest is maintained in `config/built-for-cloud.php` through
-`php artisan bfc:starter:configure`. Muster uses the package's human authentication, member,
-session, and credential surfaces. Its `muster.check-in` app purpose maps to consumption; explicit
-per-app credential issuance and check-in ingestion arrive in a later slice.
+The canonical app manifest and `muster.check-in` purpose declaration are deferred until the
+manifest contract is reconciled. Do not hand-edit `config/built-for-cloud.php` or run the
+configuration command without a replacement specification. Muster uses the package's human
+authentication middleware; explicit per-app credential issuance and check-in ingestion arrive in a
+later slice.
 
 Laravel Cloud provisions resource configuration. Do not commit secrets, app IDs, personal config,
 machine-specific paths, or hand-written values that shadow Cloud-managed resource variables.

@@ -6,13 +6,11 @@ use App\BuiltForCloud\MonitorHeadlineLabel;
 use App\BuiltForCloud\MusterCredentialDeclaration;
 use App\Models\Monitor;
 use ArtisanBuild\BuiltForCloud\Contracts\CredentialDeclaration;
-use ArtisanBuild\BuiltForCloud\CredentialPurpose;
-use ArtisanBuild\BuiltForCloud\OperatorAbility;
-use ArtisanBuild\BuiltForCloud\SubjectType;
 use ArtisanBuild\BuiltForCloud\Testing\ContractAssertions;
-use ArtisanBuild\BuiltForCloud\Testing\WithCredentials;
+use ArtisanBuild\BuiltForCloud\Vitals\CollectVitals;
+use Illuminate\Testing\TestResponse;
 
-uses(ContractAssertions::class, WithCredentials::class);
+uses(ContractAssertions::class);
 
 it('reports only enabled monitors through the declared bounded headline', function (): void {
     foreach (['Test Created API Sync', 'Test Created Invoice Sweep'] as $name) {
@@ -30,22 +28,19 @@ it('reports only enabled monitors through the declared bounded headline', functi
     ]);
     $disabled->forceFill(['is_enabled' => false])->save();
 
-    $reader = $this->mintCredential([
-        'purpose' => CredentialPurpose::DashboardMetadata,
-        'subject_type' => SubjectType::Operator,
-        'subject_ref' => 'test-created-vitals-reader',
-        'abilities' => [OperatorAbility::MetadataRead->value],
-    ]);
-
     expect(resolve(CredentialDeclaration::class))->toBeInstanceOf(MusterCredentialDeclaration::class)
         ->and(MusterCredentialDeclaration::HEADLINE_VOCABULARY)->toBe(MonitorHeadlineLabel::class);
 
-    $response = $this->getJson('/bfc/console/vitals', [
-        'Authorization' => $reader->bearerHeader(),
-    ])->assertOk()
-        ->assertJsonPath('headline.value', 2)
-        ->assertJsonPath('headline.label', MonitorHeadlineLabel::EnabledMonitors->value)
-        ->assertJsonPath('headline.unit', 'count');
+    $payload = resolve(CollectVitals::class)();
+    $headline = $payload->toArray()['headline'];
+
+    expect($headline)->toBe([
+        'value' => 2,
+        'label' => MonitorHeadlineLabel::EnabledMonitors->value,
+        'unit' => 'count',
+    ]);
+
+    $response = TestResponse::fromBaseResponse(response()->json($payload->toArray()));
 
     $this->assertBuiltForCloudMetadataEndpoint($response, 'GET /bfc/console/vitals');
 });

@@ -13,6 +13,7 @@ function signInToMuster(): User
         'email' => 'operator-'.bin2hex(random_bytes(4)).'@example.test',
         'password' => 'test-password',
     ]);
+    $user->refresh();
 
     test()->actingAs($user)->withSession([
         StandaloneAccess::SESSION_VERSION_KEY => $user->auth_session_version,
@@ -112,16 +113,16 @@ it('creates, displays, edits, disables, and enables a monitor', function (): voi
     expect($monitor->refresh()->is_enabled)->toBeTrue();
 });
 
-it('rejects invalid monitor timing without persisting a monitor', function (array $timing): void {
+it('rejects invalid monitor timing without persisting a monitor', function (array $timing, string $error): void {
     signInToMuster();
 
     $this->post(route('monitors.store'), [
         'name' => 'Test Created Invalid Timing',
         ...$timing,
-    ])->assertSessionHasErrors(array_keys($timing));
+    ])->assertSessionHasErrors($error);
 
     expect(Monitor::query()->count())->toBe(0);
 })->with([
-    'cadence must be positive' => [['cadence_seconds' => 0, 'grace_seconds' => 30]],
-    'grace must be nonnegative' => [['cadence_seconds' => 60, 'grace_seconds' => -1]],
+    'cadence must be positive' => [['cadence_seconds' => 0, 'grace_seconds' => 30], 'cadence_seconds'],
+    'grace must be nonnegative' => [['cadence_seconds' => 60, 'grace_seconds' => -1], 'grace_seconds'],
 ]);

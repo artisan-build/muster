@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -13,8 +14,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property int $grace_seconds
  * @property bool $is_enabled
  * @property string $status
- * @property \Carbon\CarbonImmutable|null $last_check_in_at
- * @property \Carbon\CarbonImmutable|null $next_due_at
+ * @property CarbonImmutable|null $last_check_in_at
+ * @property CarbonImmutable|null $next_due_at
  */
 final class Monitor extends Model
 {

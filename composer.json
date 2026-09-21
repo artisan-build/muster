@@ -7,8 +7,7 @@
         "laravel",
         "laravel-cloud",
         "heartbeat-monitoring",
-        "cron-monitoring",
-        "laravel-cloud"
+        "cron-monitoring"
     ],
     "license": "MIT",
     "require": {
