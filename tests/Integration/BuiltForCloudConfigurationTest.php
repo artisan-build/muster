@@ -1,39 +1,27 @@
 <?php
 
+use ArtisanBuild\BuiltForCloud\AppPurposeRegistry;
 use ArtisanBuild\BuiltForCloud\BuiltForCloudServiceProvider;
+use ArtisanBuild\BuiltForCloud\CredentialPurpose;
+use ArtisanBuild\BuiltForCloud\Testing\ContractAssertions;
 use ArtisanBuild\BuiltForCloud\User;
 use Composer\InstalledVersions;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
 
-it('owns only the D-UI-3 application configuration overlay', function (): void {
-    /** @var array<string, mixed> $appConfig */
-    $appConfig = require config_path('built-for-cloud.php');
+uses(ContractAssertions::class);
 
-    expect($appConfig)->toBe([
-        'manifest' => [
-            'name' => null,
-            'slug' => null,
-            'description' => null,
-            'icon' => null,
-            'product_url' => null,
-        ],
-        'credentials' => [
-            'guard' => 'bfc',
-            'declaration' => null,
-            'session_guard' => null,
-            'app_purposes' => [],
-        ],
-        'ui' => [
-            'landing_page' => false,
-            'member_management' => false,
-            'personal_credentials' => false,
-            'installation_credentials' => false,
-            'session_management' => false,
-            'managed_transitions' => false,
-            'credential_purposes' => [],
-        ],
+it('matches the canonical Muster catalog and purpose contracts', function (): void {
+    $this->assertBuiltForCloudManifestMatches([
+        'name' => 'Muster',
+        'slug' => 'muster',
+        'description' => 'Self-hosted heartbeat and cron monitoring for scheduled tasks and background services.',
+        'icon' => 'https://raw.githubusercontent.com/artisan-build/muster/main/public/favicon.svg',
+        'product_url' => 'https://scalpels.app/products/muster',
     ]);
+
+    expect(resolve(AppPurposeRegistry::class)->purpose('muster.check-in'))
+        ->toBe(CredentialPurpose::Consumption);
 });
 
 it('merges package defaults and auto-discovers the released provider', function (): void {
@@ -47,19 +35,19 @@ it('merges package defaults and auto-discovers the released provider', function 
     assert(is_string($version));
 
     expect(config('built-for-cloud.manifest'))->toBe([
-        'name' => null,
-        'slug' => null,
-        'description' => null,
-        'icon' => null,
-        'product_url' => null,
+        'name' => 'Muster',
+        'slug' => 'muster',
+        'description' => 'Self-hosted heartbeat and cron monitoring for scheduled tasks and background services.',
+        'icon' => 'https://raw.githubusercontent.com/artisan-build/muster/main/public/favicon.svg',
+        'product_url' => 'https://scalpels.app/products/muster',
     ])->and(config('built-for-cloud.ui'))->toBe([
-        'landing_page' => false,
-        'member_management' => false,
-        'personal_credentials' => false,
-        'installation_credentials' => false,
-        'session_management' => false,
-        'managed_transitions' => false,
-        'credential_purposes' => [],
+        'landing_page' => true,
+        'member_management' => true,
+        'personal_credentials' => true,
+        'installation_credentials' => true,
+        'session_management' => true,
+        'managed_transitions' => true,
+        'credential_purposes' => ['muster.check-in'],
     ])->and(config('built-for-cloud.product'))->toBe(config('app.name'))
         ->and(config('built-for-cloud.credentials.guard'))->toBe('bfc')
         ->and(config('auth.defaults.guard'))->toBe('web')
@@ -77,6 +65,7 @@ it('runs fresh package-owned migrations on sqlite', function (): void {
         ->and(Schema::hasTable('users'))->toBeTrue()
         ->and(Schema::hasTable('bfc_authority'))->toBeTrue()
         ->and(Schema::hasTable('credentials'))->toBeTrue()
+        ->and(Schema::hasTable('monitors'))->toBeTrue()
         ->and(Schema::hasColumn('users', 'normalized_email'))->toBeTrue()
         ->and(glob(database_path('migrations/*users*')) ?: [])->toBe([])
         ->and(class_exists('App\\Models\\User'))->toBeFalse();

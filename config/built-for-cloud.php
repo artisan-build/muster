@@ -2,29 +2,36 @@
 
 declare(strict_types=1);
 
-return [
-    'manifest' => [
-        'name' => null,
-        'slug' => null,
-        'description' => null,
-        'icon' => null,
-        'product_url' => null,
-    ],
-
-    'credentials' => [
-        'guard' => env('BUILT_FOR_CLOUD_CREDENTIAL_GUARD', 'bfc'),
-        'declaration' => null,
-        'session_guard' => null,
-        'app_purposes' => [],
-    ],
-
-    'ui' => [
-        'landing_page' => false,
-        'member_management' => false,
-        'personal_credentials' => false,
-        'installation_credentials' => false,
-        'session_management' => false,
-        'managed_transitions' => false,
-        'credential_purposes' => [],
-    ],
-];
+return array (
+  'manifest' => 
+  array (
+    'name' => 'Muster',
+    'slug' => 'muster',
+    'description' => 'Self-hosted heartbeat and cron monitoring for scheduled tasks and background services.',
+    'icon' => 'https://raw.githubusercontent.com/artisan-build/muster/main/public/favicon.svg',
+    'product_url' => 'https://scalpels.app/products/muster',
+  ),
+  'credentials' => 
+  array (
+    'guard' => 'bfc',
+    'declaration' => NULL,
+    'session_guard' => NULL,
+    'app_purposes' => 
+    array (
+      'muster.check-in' => 'consumption',
+    ),
+  ),
+  'ui' => 
+  array (
+    'landing_page' => true,
+    'member_management' => true,
+    'personal_credentials' => true,
+    'installation_credentials' => true,
+    'session_management' => true,
+    'managed_transitions' => true,
+    'credential_purposes' => 
+    array (
+      0 => 'muster.check-in',
+    ),
+  ),
+);
