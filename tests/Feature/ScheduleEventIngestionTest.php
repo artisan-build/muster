@@ -215,6 +215,65 @@ it('correlates overlapping executions and keeps the unfinished invocation visibl
         ->assertSee($executionA);
 });
 
+it('keeps the newest start schedule metadata when an older execution completes', function (): void {
+    $this->travelTo('2026-09-21 13:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan schedule:metadata-order --test-created';
+    $executionA = '12121212-1212-4212-8212-121212121212';
+    $executionB = '23232323-2323-4232-8232-232323232323';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'display' => 'Test Created Schedule S1',
+        'expression' => '*/5 * * * *',
+        'timezone' => 'UTC',
+        'background' => false,
+        'execution_id' => $executionA,
+    ]))->assertOk();
+
+    $this->travelTo('2026-09-21 13:01:00 UTC');
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'display' => 'Test Created Schedule S2',
+        'expression' => '*/10 * * * *',
+        'timezone' => 'Europe/Zurich',
+        'background' => true,
+        'execution_id' => $executionB,
+    ]))->assertOk();
+
+    $monitor = Monitor::query()->sole();
+    $this->travelTo('2026-09-21 13:02:00 UTC');
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'display' => 'Test Created Schedule S1',
+        'expression' => '*/5 * * * *',
+        'timezone' => 'UTC',
+        'background' => false,
+        'phase' => 'finished',
+        'exit_code' => 0,
+        'runtime' => 120.0,
+        'execution_id' => $executionA,
+    ]))->assertOk();
+
+    $completion = $monitor->events()
+        ->where('execution_id', $executionA)
+        ->where('event_type', CheckInEvent::TYPE_FINISHED)
+        ->sole();
+
+    expect($monitor->refresh()->name)->toBe('Test Created Schedule S2')
+        ->and($monitor->display)->toBe('Test Created Schedule S2')
+        ->and($monitor->expression)->toBe('*/10 * * * *')
+        ->and($monitor->timezone)->toBe('Europe/Zurich')
+        ->and($monitor->background)->toBeTrue()
+        ->and($monitor->cadence_seconds)->toBe(600)
+        ->and($monitor->next_due_at?->toISOString())->toBe('2026-09-21T13:10:00.000000Z')
+        ->and($monitor->status)->toBe('running')
+        ->and($monitor->executions()->where('execution_id', $executionB)->sole()->status)
+        ->toBe(ScheduleExecution::STATUS_RUNNING)
+        ->and($completion->display)->toBe('Test Created Schedule S1')
+        ->and($completion->expression)->toBe('*/5 * * * *')
+        ->and($completion->timezone)->toBe('UTC')
+        ->and($completion->background)->toBeFalse();
+});
+
 it('makes duplicate starts and completions idempotent and rejects unknown completions without mutation', function (): void {
     $this->travelTo('2026-09-21 14:00:00 UTC');
     $issued = issueScheduleEventBearer();
@@ -259,6 +318,65 @@ it('makes duplicate starts and completions idempotent and rejects unknown comple
     expect($monitor->refresh()->getAttributes())->toBe($afterFinish)
         ->and($monitor->executions()->sole()->getAttributes())->toBe($executionAfterFinish)
         ->and($monitor->events()->count())->toBe(2);
+});
+
+it('retains every open execution while pruning completed executions to the newest one hundred deterministically', function (): void {
+    $this->travelTo('2026-09-21 12:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan execution:retention --test-created';
+    $oldOpenId = '34343434-3434-4434-8434-343434343434';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $oldOpenId,
+    ]))->assertOk();
+
+    $monitor = Monitor::query()->sole();
+    $tiedCompletion = now()->subHour();
+    $completedIds = [];
+
+    foreach (range(1, 100) as $sequence) {
+        $completedIds[] = $monitor->executions()->create([
+            'execution_id' => sprintf('00000000-0000-4000-8000-%012d', $sequence),
+            'status' => ScheduleExecution::STATUS_FINISHED,
+            'started_at' => $tiedCompletion->subMinute(),
+            'completed_at' => $tiedCompletion,
+            'runtime' => 60.0,
+            'exit_code' => 0,
+            'background' => false,
+            'timezone' => 'UTC',
+        ])->id;
+    }
+
+    $this->travelTo('2026-09-21 13:00:00 UTC');
+    $newestId = '45454545-4545-4454-8454-454545454545';
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $newestId,
+    ]))->assertOk();
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'finished',
+        'exit_code' => 0,
+        'runtime' => 1.0,
+        'execution_id' => $newestId,
+    ]))->assertOk();
+
+    $newestExecution = $monitor->executions()->where('execution_id', $newestId)->sole();
+    $expectedCompletedIds = [
+        $newestExecution->id,
+        ...array_reverse(array_slice($completedIds, 1)),
+    ];
+
+    expect($monitor->executions()->whereNotNull('completed_at')->count())->toBe(100)
+        ->and($monitor->executions()
+            ->whereNotNull('completed_at')
+            ->orderByDesc('completed_at')
+            ->orderByDesc('id')
+            ->pluck('id')
+            ->all())->toBe($expectedCompletedIds)
+        ->and($monitor->executions()->whereKey($completedIds[0])->exists())->toBeFalse()
+        ->and($monitor->executions()->where('execution_id', $oldOpenId)->sole()->status)
+        ->toBe(ScheduleExecution::STATUS_RUNNING)
+        ->and($monitor->executions()->count())->toBe(101);
 });
 
 it('computes mutable expectations in the event timezone across DST and defaults null or absent to UTC', function (): void {
@@ -493,6 +611,172 @@ it('advances an existing skipped boundary without creating late missed or non-ze
             CheckInEvent::TYPE_MISSED,
             CheckInEvent::TYPE_NON_ZERO_EXIT,
         ])->count())->toBe(0);
+});
+
+it('marks scheduler silence late and missed while retaining and rendering an orphaned execution', function (): void {
+    $this->travelTo('2026-09-21 12:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan scheduler:silence --test-created';
+    $orphanId = '56565656-5656-4565-8565-565656565656';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'expression' => '*/5 * * * *',
+        'execution_id' => $orphanId,
+    ]))->assertOk();
+
+    foreach ([
+        ['at' => '2026-09-21 12:05:00 UTC', 'id' => '67676767-6767-4676-8676-676767676767'],
+        ['at' => '2026-09-21 12:10:00 UTC', 'id' => '78787878-7878-4787-8787-787878787878'],
+    ] as $cleanRun) {
+        $this->travelTo($cleanRun['at']);
+        $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+            'expression' => '*/5 * * * *',
+            'execution_id' => $cleanRun['id'],
+        ]))->assertOk();
+        $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+            'expression' => '*/5 * * * *',
+            'phase' => 'finished',
+            'exit_code' => 0,
+            'runtime' => 1.0,
+            'execution_id' => $cleanRun['id'],
+        ]))->assertOk();
+    }
+
+    $monitor = Monitor::query()->sole();
+
+    expect($monitor->status)->toBe('running')
+        ->and($monitor->next_due_at?->toISOString())->toBe('2026-09-21T12:15:00.000000Z');
+
+    $this->travelTo('2026-09-21 12:15:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 1 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    expect($monitor->refresh()->status)->toBe('late')
+        ->and($monitor->executions()->where('execution_id', $orphanId)->sole()->status)
+        ->toBe(ScheduleExecution::STATUS_RUNNING);
+
+    $this->travelTo('2026-09-21 12:16:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 1 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    expect($monitor->refresh()->status)->toBe('missed')
+        ->and($monitor->executions()->where('execution_id', $orphanId)->sole()->completed_at)->toBeNull()
+        ->and($monitor->events()->whereIn('event_type', [
+            CheckInEvent::TYPE_LATE,
+            CheckInEvent::TYPE_MISSED,
+        ])->orderBy('id')->pluck('event_type')->all())->toBe([
+            CheckInEvent::TYPE_LATE,
+            CheckInEvent::TYPE_MISSED,
+        ]);
+
+    $this->flushHeaders();
+    signInForScheduleEvents($issued['user']);
+    $this->get(route('monitors.show', $monitor))
+        ->assertOk()
+        ->assertSee('data-testid="monitor-open-executions"', false)
+        ->assertSee($orphanId);
+});
+
+it('keeps an open execution running when every later occurrence reports a timely skip', function (): void {
+    $this->travelTo('2026-09-21 14:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan scheduler:timely-skips --test-created';
+    $executionId = '89898989-8989-4898-8989-898989898989';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'expression' => '*/5 * * * *',
+        'execution_id' => $executionId,
+    ]))->assertOk();
+
+    foreach ([
+        ['skip' => '2026-09-21 14:05:00 UTC', 'evaluate' => '2026-09-21 14:06:00 UTC'],
+        ['skip' => '2026-09-21 14:10:00 UTC', 'evaluate' => '2026-09-21 14:11:00 UTC'],
+    ] as $occurrence) {
+        $this->travelTo($occurrence['skip']);
+        $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+            'expression' => '*/5 * * * *',
+            'phase' => 'skipped',
+            'execution_id' => null,
+        ]))->assertOk();
+        $this->travelTo($occurrence['evaluate']);
+        $this->artisan('monitors:evaluate')
+            ->expectsOutput('Evaluated monitors; 0 state transition(s) recorded.')
+            ->assertSuccessful();
+    }
+
+    $monitor = Monitor::query()->sole();
+
+    expect($monitor->status)->toBe('running')
+        ->and($monitor->next_due_at?->toISOString())->toBe('2026-09-21T14:15:00.000000Z')
+        ->and($monitor->executions()->where('execution_id', $executionId)->sole()->status)
+        ->toBe(ScheduleExecution::STATUS_RUNNING)
+        ->and($monitor->events()->whereIn('event_type', [
+            CheckInEvent::TYPE_LATE,
+            CheckInEvent::TYPE_MISSED,
+            CheckInEvent::TYPE_NON_ZERO_EXIT,
+        ])->count())->toBe(0);
+});
+
+it('clears only a transitional late state when the same occurrence reports skipped', function (): void {
+    $this->travelTo('2026-09-21 15:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $runningCommand = 'php artisan scheduler:late-running-skip --test-created';
+    $healthyCommand = 'php artisan scheduler:late-healthy-skip --test-created';
+    $runningId = '90909090-9090-4090-8090-909090909090';
+    $healthyId = 'abababab-abab-4aba-8aba-abababababab';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($runningCommand, [
+        'expression' => '*/5 * * * *',
+        'execution_id' => $runningId,
+    ]))->assertOk();
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($healthyCommand, [
+        'expression' => '*/5 * * * *',
+        'execution_id' => $healthyId,
+    ]))->assertOk();
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($healthyCommand, [
+        'expression' => '*/5 * * * *',
+        'phase' => 'finished',
+        'exit_code' => 0,
+        'runtime' => 1.0,
+        'execution_id' => $healthyId,
+    ]))->assertOk();
+
+    $this->travelTo('2026-09-21 15:05:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 2 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    $running = Monitor::query()->where('command', $runningCommand)->sole();
+    $healthy = Monitor::query()->where('command', $healthyCommand)->sole();
+
+    expect($running->status)->toBe('late')
+        ->and($healthy->status)->toBe('late');
+
+    foreach ([$runningCommand, $healthyCommand] as $command) {
+        $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+            'expression' => '*/5 * * * *',
+            'phase' => 'skipped',
+            'execution_id' => null,
+        ]))->assertOk();
+    }
+
+    expect($running->refresh()->status)->toBe('running')
+        ->and($healthy->refresh()->status)->toBe('healthy')
+        ->and($running->next_due_at?->toISOString())->toBe('2026-09-21T15:10:00.000000Z')
+        ->and($healthy->next_due_at?->toISOString())->toBe('2026-09-21T15:10:00.000000Z');
+
+    foreach ([$running, $healthy] as $monitor) {
+        expect($monitor->events()->where('event_type', CheckInEvent::TYPE_LATE)->count())->toBe(1)
+            ->and($monitor->events()->whereIn('event_type', [
+                CheckInEvent::TYPE_MISSED,
+                CheckInEvent::TYPE_NON_ZERO_EXIT,
+            ])->count())->toBe(0);
+    }
 });
 
 it('returns an indistinguishable denial for schedule-event credential refusal classes', function (): void {

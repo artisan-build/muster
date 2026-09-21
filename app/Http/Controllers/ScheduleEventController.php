@@ -26,6 +26,8 @@ use Illuminate\Validation\ValidationException;
 
 final class ScheduleEventController extends Controller
 {
+    private const int COMPLETED_EXECUTION_LIMIT = 100;
+
     private const int DEFAULT_GRACE_SECONDS = 60;
 
     public function __construct(
@@ -192,7 +194,6 @@ final class ScheduleEventController extends Controller
             ->where('status', ScheduleExecution::STATUS_RUNNING)
             ->exists();
         $updates = [
-            ...$this->scheduleData($payload),
             'status' => $eventType === CheckInEvent::TYPE_FINISHED
                 ? ($hasOpenExecution ? 'running' : 'healthy')
                 : 'failed',
@@ -201,16 +202,9 @@ final class ScheduleEventController extends Controller
             'last_runtime' => $payload['runtime'],
         ];
 
-        if ($monitor->expression !== $payload['expression'] || $monitor->timezone !== $payload['timezone']) {
-            [$updates['next_due_at'], $updates['cadence_seconds']] = $this->expectation(
-                $payload['expression'],
-                $payload['timezone'],
-                $acceptedAt,
-            );
-        }
-
         $monitor->forceFill($updates)->save();
         $monitor->recordActivity([$eventType], $acceptedAt, $this->eventData($payload));
+        $this->pruneCompletedExecutions($monitor);
 
         return $monitor;
     }
@@ -225,11 +219,19 @@ final class ScheduleEventController extends Controller
             $payload['timezone'],
             $acceptedAt,
         );
-        $monitor->forceFill([
+        $updates = [
             ...$this->scheduleData($payload),
             'next_due_at' => $nextDueAt,
             'cadence_seconds' => $cadenceSeconds,
-        ])->save();
+        ];
+
+        if ($monitor->status === 'late') {
+            $updates['status'] = $monitor->executions()
+                ->where('status', ScheduleExecution::STATUS_RUNNING)
+                ->exists() ? 'running' : 'healthy';
+        }
+
+        $monitor->forceFill($updates)->save();
         $monitor->recordActivity([CheckInEvent::TYPE_SKIPPED], $acceptedAt, $this->eventData($payload));
 
         return $monitor;
@@ -391,6 +393,25 @@ final class ScheduleEventController extends Controller
             'execution_id' => $payload['execution_id'],
             'timezone' => $payload['timezone'],
         ];
+    }
+
+    private function pruneCompletedExecutions(Monitor $monitor): void
+    {
+        $retainedIds = $monitor->executions()
+            ->whereNotNull('completed_at')
+            ->orderByDesc('completed_at')
+            ->orderByDesc('id')
+            ->limit(self::COMPLETED_EXECUTION_LIMIT)
+            ->pluck('id');
+
+        if ($retainedIds->count() < self::COMPLETED_EXECUTION_LIMIT) {
+            return;
+        }
+
+        $monitor->executions()
+            ->whereNotNull('completed_at')
+            ->whereNotIn('id', $retainedIds)
+            ->delete();
     }
 
     /** @return array{CarbonImmutable, int} */
