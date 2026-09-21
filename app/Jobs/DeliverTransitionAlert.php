@@ -10,6 +10,7 @@ use ArtisanBuild\BuiltForCloud\Contracts\SystemAuthorityQueueEntry;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\TimeoutExceededException;
+use Illuminate\Support\ConfigurationUrlParser;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use RuntimeException;
@@ -147,6 +148,11 @@ final class DeliverTransitionAlert implements ShouldQueue, SystemAuthorityQueueE
         }
 
         $transport = $configuration['transport'] ?? null;
+
+        if (! empty($configuration['url'])) {
+            $parsedConfiguration = (new ConfigurationUrlParser)->parseConfiguration($configuration);
+            $transport = $parsedConfiguration['driver'] ?? null;
+        }
 
         if (! is_string($transport)) {
             return false;
