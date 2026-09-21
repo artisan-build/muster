@@ -45,7 +45,7 @@ final readonly class AlertModes
     {
         return array_values(array_map(
             static fn (AlertMode $mode): int => $mode->value,
-            array_filter(AlertMode::cases(), fn (AlertMode $mode): bool => $this->contains($mode)),
+            array_filter(AlertMode::cases(), $this->contains(...)),
         ));
     }
 
@@ -53,7 +53,7 @@ final readonly class AlertModes
     {
         $labels = array_values(array_map(
             static fn (AlertMode $mode): string => $mode->label(),
-            array_filter(AlertMode::cases(), fn (AlertMode $mode): bool => $this->contains($mode)),
+            array_filter(AlertMode::cases(), $this->contains(...)),
         ));
 
         return $labels === [] ? 'Disabled' : implode(', ', $labels);

@@ -72,6 +72,7 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereCommand($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereDisplay($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereEventType($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereExecutionId($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereExitCode($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereExpression($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereId($value)
@@ -81,6 +82,7 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereNextDueAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereOccurredAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereRuntime($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereTimezone($value)
  * @mixin \Eloquent
  */
 	#[\AllowDynamicProperties]
@@ -137,9 +139,9 @@ namespace App\Models{
  * @property int|null $last_exit_code
  * @property float|null $last_runtime
  * @property bool $background
- * @property \App\ValueObjects\AlertModes $email_alert_modes
+ * @property AlertModes $email_alert_modes
  * @property string|null $email_alert_destination
- * @property \App\ValueObjects\AlertModes $webhook_alert_modes
+ * @property AlertModes $webhook_alert_modes
  * @property string|null $webhook_alert_destination
  * @property \Carbon\CarbonImmutable|null $created_at
  * @property \Carbon\CarbonImmutable|null $updated_at
@@ -170,6 +172,7 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereNextDueAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereScheduleKey($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereStatus($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereTimezone($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereUpdatedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereWebhookAlertDestination($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereWebhookAlertModes($value)
@@ -191,10 +194,20 @@ namespace App\Models{
  * @property int|null $exit_code
  * @property bool $background
  * @property string $timezone
- * @property-read \App\Models\Monitor|null $monitor
+ * @property-read \App\Models\Monitor $monitor
  * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution whereBackground($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution whereCompletedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution whereExecutionId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution whereExitCode($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution whereMonitorId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution whereRuntime($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution whereStartedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution whereStatus($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution whereTimezone($value)
  * @mixin \Eloquent
  */
 	#[\AllowDynamicProperties]
