@@ -19,9 +19,9 @@ foundation slice yet.
 
 ## Built For Cloud
 
-Muster is intended for the Built for Cloud catalog. Its canonical manifest and
-`muster.check-in` purpose declaration are deferred until the manifest contract is reconciled. The
-check-in endpoint and credential authorization are not implemented yet.
+Muster is a [Built for Cloud catalog product](https://scalpels.app/products/muster). Its canonical
+manifest is maintained in `config/built-for-cloud.php`, with `muster.check-in` declared as a
+consumption purpose. The check-in endpoint and credential authorization are not implemented yet.
 
 Built for Cloud provides the human authentication used by Muster's monitor routes through the
 package-owned `bfc.auth` middleware.

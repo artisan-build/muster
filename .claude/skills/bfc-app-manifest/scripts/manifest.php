@@ -4,15 +4,15 @@
 declare(strict_types=1);
 
 const MANIFEST_KEYS = ['name', 'slug', 'description', 'icon', 'product_url'];
-const UI_DEFAULTS = [
-    'landing_page' => false,
-    'member_management' => false,
-    'personal_credentials' => false,
-    'installation_credentials' => false,
-    'session_management' => false,
-    'managed_transitions' => false,
-    'credential_purposes' => [],
+const UI_AFFORDANCES = [
+    'landing_page',
+    'member_management',
+    'personal_credentials',
+    'installation_credentials',
+    'session_management',
+    'managed_transitions',
 ];
+const UI_KEYS = [...UI_AFFORDANCES, 'credential_purposes'];
 
 $json = in_array('--json', $argv, true);
 
@@ -29,15 +29,21 @@ function finish(array $result, bool $json, int $code): never
 
 function usage(bool $json, string $message): never
 {
-    finish(['ok' => false, 'message' => $message, 'usage' => 'manifest.php (--check | --write --name=... --slug=... --description=... --icon=/...svg --product-url=https://scalpels.app/...) [--root=.] [--json]'], $json, 2);
+    finish(['ok' => false, 'message' => $message, 'usage' => 'manifest.php (--check | --write --name=... --slug=... --description=... --icon=https://... --product-url=https://scalpels.app/...) [--root=.] [--json]'], $json, 2);
+}
+
+function validAbsoluteHttpsUrl(mixed $url): bool
+{
+    return is_string($url)
+        && filter_var($url, FILTER_VALIDATE_URL) !== false
+        && strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https'
+        && is_string(parse_url($url, PHP_URL_HOST));
 }
 
 function validProductUrl(mixed $url): bool
 {
-    return is_string($url)
-        && filter_var($url, FILTER_VALIDATE_URL) !== false
-        && parse_url($url, PHP_URL_SCHEME) === 'https'
-        && parse_url($url, PHP_URL_HOST) === 'scalpels.app';
+    return validAbsoluteHttpsUrl($url)
+        && strtolower((string) parse_url($url, PHP_URL_HOST)) === 'scalpels.app';
 }
 
 $options = getopt('', ['check', 'write', 'name:', 'slug:', 'description:', 'icon:', 'product-url:', 'root:', 'json']);
@@ -80,8 +86,8 @@ if ($writing) {
     if (! validProductUrl($values['product-url'])) {
         $errors[] = 'product_url must be an absolute HTTPS URL on scalpels.app';
     }
-    if (preg_match('#^/[A-Za-z0-9._/-]+\.svg$#', $values['icon']) !== 1 || str_contains($values['icon'], '\\') || array_intersect(explode('/', $values['icon']), ['.', '..']) !== []) {
-        $errors[] = 'icon must be a root-relative .svg path without traversal';
+    if (! validAbsoluteHttpsUrl($values['icon'])) {
+        $errors[] = 'icon must be an absolute HTTPS URL';
     }
     if ($errors !== []) {
         finish(['ok' => false, 'message' => implode('; ', $errors), 'errors' => $errors], $json, 1);
@@ -95,7 +101,7 @@ if ($writing) {
         'product_url' => $values['product-url'],
     ];
     $manifestExport = var_export($manifest, true);
-    $uiExport = var_export(UI_DEFAULTS, true);
+    $uiExport = var_export(array_fill_keys(UI_AFFORDANCES, false) + ['credential_purposes' => []], true);
     $content = <<<PHP
         <?php
 
@@ -153,13 +159,28 @@ if (! is_array($config) || array_keys($config) !== ['manifest', 'credentials', '
             if (! validProductUrl($config['manifest']['product_url'] ?? null)) {
                 $errors[] = 'manifest.product_url must be an absolute HTTPS URL on scalpels.app';
             }
-            if (is_string($config['manifest']['icon'] ?? null) && (preg_match('#^/[A-Za-z0-9._/-]+\.svg$#', $config['manifest']['icon']) !== 1 || str_contains($config['manifest']['icon'], '\\') || array_intersect(explode('/', $config['manifest']['icon']), ['.', '..']) !== [])) {
-                $errors[] = 'manifest.icon must be a root-relative .svg path without traversal';
+            if (! validAbsoluteHttpsUrl($config['manifest']['icon'] ?? null)) {
+                $errors[] = 'manifest.icon must be an absolute HTTPS URL';
             }
         }
     }
-    if (! is_array($config['ui']) || $config['ui'] !== UI_DEFAULTS) {
-        $errors[] = 'ui must contain only the current false affordances and an empty credential_purposes list';
+    if (! is_array($config['ui'])) {
+        $errors[] = 'ui must be an array';
+    } else {
+        $uiKeys = array_keys($config['ui']);
+        $expectedUiKeys = UI_KEYS;
+        sort($uiKeys);
+        sort($expectedUiKeys);
+
+        if ($uiKeys !== $expectedUiKeys) {
+            $errors[] = 'ui keys do not match the frozen shape';
+        } elseif (array_filter(UI_AFFORDANCES, fn (string $key): bool => ! is_bool($config['ui'][$key])) !== []) {
+            $errors[] = 'ui affordances must be boolean';
+        } elseif (! is_array($config['ui']['credential_purposes'])
+            || ! array_is_list($config['ui']['credential_purposes'])
+            || array_filter($config['ui']['credential_purposes'], fn (mixed $purpose): bool => ! is_string($purpose)) !== []) {
+            $errors[] = 'ui.credential_purposes must be a list of strings';
+        }
     }
 }
 

@@ -45,6 +45,27 @@ it('refuses unauthenticated monitor management requests through package auth', f
     }
 });
 
+it('refuses unauthenticated bound routes before revealing monitor existence', function (string $route): void {
+    config(['app.debug' => false]);
+
+    $monitor = Monitor::query()->create([
+        'name' => 'Test Created Existing Monitor',
+        'cadence_seconds' => 300,
+        'grace_seconds' => 30,
+    ]);
+
+    $existing = $this->getJson(route($route, $monitor));
+    $missing = $this->getJson(route($route, $monitor->id + 1));
+
+    $existing->assertUnauthorized();
+    $missing->assertUnauthorized();
+
+    expect($missing->getContent())->toBe($existing->getContent());
+})->with([
+    'show' => 'monitors.show',
+    'edit' => 'monitors.edit',
+]);
+
 it('creates, displays, edits, disables, and enables a monitor', function (): void {
     signInToMuster();
 
