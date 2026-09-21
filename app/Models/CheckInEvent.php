@@ -12,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $id
  * @property int $monitor_id
  * @property CarbonImmutable $checked_in_at
+ *
+ * @mixin IdeHelperCheckInEvent
  */
 final class CheckInEvent extends Model
 {

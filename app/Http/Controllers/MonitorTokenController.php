@@ -46,7 +46,7 @@ final class MonitorTokenController extends Controller
             $monitor->checkIns()->create(['checked_in_at' => $acceptedAt]);
 
             $retainedIds = $monitor->checkIns()
-                ->orderByDesc('checked_in_at')
+                ->latest('checked_in_at')
                 ->orderByDesc('id')
                 ->limit(100)
                 ->pluck('id');
@@ -80,7 +80,7 @@ final class MonitorTokenController extends Controller
 
         return response()->json([
             'events' => $monitor->checkIns()
-                ->orderByDesc('checked_in_at')
+                ->latest('checked_in_at')
                 ->orderByDesc('id')
                 ->get()
                 ->map(static fn (CheckInEvent $event): array => [

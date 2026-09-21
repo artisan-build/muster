@@ -36,6 +36,38 @@ it('finds no app-owned auth or root surface in the exported starter tree', funct
         ->toBe(array_fill_keys(ReferenceConsumerInventory::FAMILIES, []));
 });
 
+it('allows the exact optional package credential guard', function (): void {
+    $root = inventoryControlRoot([
+        'config/auth.php' => <<<'PHP'
+<?php
+
+use ArtisanBuild\BuiltForCloud\User;
+
+return [
+    'guards' => [
+        'web' => ['driver' => 'session', 'provider' => 'users'],
+        'bfc' => ['driver' => 'bfc', 'provider' => 'users'],
+    ],
+    'providers' => ['users' => ['driver' => 'eloquent', 'model' => User::class]],
+];
+PHP,
+    ]);
+
+    try {
+        expect(ReferenceConsumerInventory::inspect($root))
+            ->toBe(array_fill_keys(ReferenceConsumerInventory::FAMILIES, []));
+    } finally {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($iterator as $entry) {
+            $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+        }
+        rmdir($root);
+    }
+});
+
 it('observes every independently introduced inventory control red', function (array $families, array $files): void {
     $root = inventoryControlRoot($files);
 

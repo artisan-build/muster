@@ -39,16 +39,16 @@ function issueMusterBearer(string $appPurpose, ?User $user = null): array
 
     $request = Request::create('/bfc/device-authorizations', 'POST');
     $request->setUserResolver(static fn (): User => $user);
-    $request->setLaravelSession(app('session')->driver());
+    $request->setLaravelSession(resolve('session')->driver());
 
-    $start = app(StartDeviceAuthorization::class)($request, $appPurpose, 'Test Created Muster Bearer');
-    app(DecideDeviceAuthorization::class)(
+    $start = resolve(StartDeviceAuthorization::class)($request, $appPurpose, 'Test Created Muster Bearer');
+    resolve(DecideDeviceAuthorization::class)(
         $request,
         $start->userCode->reveal(),
         $start->browserNonce->reveal(),
         true,
     );
-    $token = app(PollDeviceAuthorization::class)($request, $start->deviceCode->reveal());
+    $token = resolve(PollDeviceAuthorization::class)($request, $start->deviceCode->reveal());
 
     return [
         'secret' => $token->accessToken->reveal(),
@@ -93,7 +93,7 @@ function signInForSecureCheckIns(): void
 }
 
 it('declares two installation-owned consumption profiles with exact server-owned scopes', function (): void {
-    $declaration = app(CredentialDeclaration::class);
+    $declaration = resolve(CredentialDeclaration::class);
     $partition = CredentialPartition::local();
 
     expect($declaration)->toBeInstanceOf(MusterCredentialDeclaration::class)
@@ -109,7 +109,7 @@ it('declares two installation-owned consumption profiles with exact server-owned
         ]);
 
     foreach ($profiles as $profile) {
-        expect(app(AppPurposeRegistry::class)->purpose($profile->appPurpose))->toBe(CredentialPurpose::Consumption)
+        expect(resolve(AppPurposeRegistry::class)->purpose($profile->appPurpose))->toBe(CredentialPurpose::Consumption)
             ->and($profile->ownership)->toBe(CredentialAuthorizationOwnership::Installation)
             ->and($profile->abilities)->toBe([])
             ->and($profile->scope->subject->type)->toBe($partition->subject_type)
@@ -292,7 +292,7 @@ it('retains the newest 100 events and renders test-created history to authentica
         ]);
     }
 
-    $oldestId = $monitor->checkIns()->orderBy('checked_in_at')->value('id');
+    $oldestId = $monitor->checkIns()->oldest('checked_in_at')->value('id');
     $checkIn = issueMusterBearer('muster.check-in');
     $history = issueMusterBearer('muster.history.read', $checkIn['user']);
 

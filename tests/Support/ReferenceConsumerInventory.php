@@ -62,10 +62,11 @@ final class ReferenceConsumerInventory
         if (is_file($authPath)) {
             $auth = (static fn (string $path): mixed => require $path)($authPath);
             $expectedGuards = ['web' => ['driver' => 'session', 'provider' => 'users']];
+            $expectedGuardsWithBfc = $expectedGuards + ['bfc' => ['driver' => 'bfc', 'provider' => 'users']];
             $expectedProviders = ['users' => ['driver' => 'eloquent', 'model' => User::class]];
 
             if (! is_array($auth)
-                || ($auth['guards'] ?? null) !== $expectedGuards
+                || ! in_array($auth['guards'] ?? null, [$expectedGuards, $expectedGuardsWithBfc], true)
                 || ($auth['providers'] ?? null) !== $expectedProviders) {
                 $found['foreign_human_guards'][] = 'config/auth.php';
             }

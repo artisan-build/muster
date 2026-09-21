@@ -34,9 +34,7 @@ final class Monitor extends Model
     protected static function booted(): void
     {
         self::creating(function (self $monitor): void {
-            if ($monitor->credential_partition_id === null) {
-                $monitor->credential_partition_id = CredentialPartition::local()->id;
-            }
+            $monitor->credential_partition_id ??= CredentialPartition::local()->id;
         });
 
         self::updating(function (self $monitor): void {
