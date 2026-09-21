@@ -180,9 +180,17 @@ final class ScheduleEventController extends Controller
             ]);
         }
 
+        $previousLatestCompletion = $monitor->executions()
+            ->whereNotNull('completed_at')
+            ->latest('started_at')
+            ->orderByDesc('id')
+            ->first();
         $eventType = $payload['phase'] === 'finished' && $payload['exit_code'] === 0
             ? CheckInEvent::TYPE_FINISHED
             : CheckInEvent::TYPE_NON_ZERO_EXIT;
+        $deliverAlert = $eventType !== CheckInEvent::TYPE_NON_ZERO_EXIT
+            || $previousLatestCompletion?->status !== ScheduleExecution::STATUS_FAILED
+            || $monitor->status === 'healthy';
         $executionStatus = $eventType === CheckInEvent::TYPE_FINISHED
             ? ScheduleExecution::STATUS_FINISHED
             : ScheduleExecution::STATUS_FAILED;
@@ -214,7 +222,12 @@ final class ScheduleEventController extends Controller
         ];
 
         $monitor->forceFill($updates)->save();
-        $monitor->recordActivity([$eventType], $acceptedAt, $this->eventData($payload));
+        $monitor->recordActivity(
+            [$eventType],
+            $acceptedAt,
+            $this->eventData($payload),
+            $deliverAlert,
+        );
         $this->pruneCompletedExecutions($monitor);
 
         return $monitor;

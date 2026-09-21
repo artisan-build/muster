@@ -29,8 +29,11 @@
         </label>
         <label>
             <span>Email destination</span>
-            <input type="email" name="email_alert_destination" value="{{ $monitor?->email_alert_destination }}" maxlength="255" autocomplete="email">
+            <input type="email" name="email_alert_destination" value="" maxlength="255" autocomplete="email">
             @error('email_alert_destination') <small class="field-error">{{ $message }}</small> @enderror
+            @if ($monitor?->email_alert_destination !== null)
+                <small data-testid="monitor-email-alert-destination-configured">Configured</small>
+            @endif
         </label>
     </fieldset>
 
@@ -46,8 +49,11 @@
         </label>
         <label>
             <span>Webhook destination</span>
-            <input type="url" name="webhook_alert_destination" value="{{ $monitor?->webhook_alert_destination }}" maxlength="2048" autocomplete="off">
+            <input type="url" name="webhook_alert_destination" value="" maxlength="2048" autocomplete="off">
             @error('webhook_alert_destination') <small class="field-error">{{ $message }}</small> @enderror
+            @if ($monitor?->webhook_alert_destination !== null)
+                <small data-testid="monitor-webhook-alert-destination-configured">Configured</small>
+            @endif
         </label>
     </fieldset>
 </div>

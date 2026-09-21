@@ -22,7 +22,7 @@ final class EvaluateMonitorLateness extends SystemAuthorityCommand
         Monitor::query()
             ->where('is_enabled', true)
             ->whereNotNull('next_due_at')
-            ->whereIn('status', ['healthy', 'running', 'late'])
+            ->whereIn('status', ['healthy', 'running', 'failed', 'late'])
             ->select('id')
             ->orderBy('id')
             ->chunkById(100, function ($monitors) use (&$transitionCount): void {
@@ -37,7 +37,7 @@ final class EvaluateMonitorLateness extends SystemAuthorityCommand
                         $evaluatedAt = now();
                         $transitions = 0;
 
-                        if (in_array($monitor->status, ['healthy', 'running'], true)
+                        if (in_array($monitor->status, ['healthy', 'running', 'failed'], true)
                             && $evaluatedAt->greaterThanOrEqualTo($monitor->next_due_at)) {
                             $monitor->forceFill(['status' => 'late'])->save();
                             $monitor->recordActivity([CheckInEvent::TYPE_LATE], $evaluatedAt);

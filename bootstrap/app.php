@@ -34,5 +34,8 @@ return Application::configure(basePath: dirname(__DIR__))
         );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->dontFlash([
+            'email_alert_destination',
+            'webhook_alert_destination',
+        ]);
     })->create();

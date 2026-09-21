@@ -99,8 +99,12 @@ final class Monitor extends Model
      * @param  list<string>  $eventTypes
      * @param  array<string, mixed>  $attributes
      */
-    public function recordActivity(array $eventTypes, CarbonInterface $occurredAt, array $attributes = []): void
-    {
+    public function recordActivity(
+        array $eventTypes,
+        CarbonInterface $occurredAt,
+        array $attributes = [],
+        bool $deliverAlerts = true,
+    ): void {
         foreach ($eventTypes as $eventType) {
             $event = $this->events()->create([
                 ...$attributes,
@@ -111,7 +115,7 @@ final class Monitor extends Model
                 'next_due_at' => $this->next_due_at,
             ]);
 
-            if (AlertMode::forEventType($eventType) !== null) {
+            if ($deliverAlerts && AlertMode::forEventType($eventType) !== null) {
                 $this->createAlertDeliveries($event);
             }
         }
