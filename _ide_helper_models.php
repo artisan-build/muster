@@ -38,6 +38,7 @@ namespace App\Models{
  * @property int $monitor_id
  * @property string $event_type
  * @property CarbonImmutable $occurred_at
+ * @property string|null $monitor_name
  * @property CarbonImmutable|null $last_check_in_at
  * @property CarbonImmutable|null $next_due_at
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\AlertDelivery> $alertDeliveries
