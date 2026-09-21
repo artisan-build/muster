@@ -369,7 +369,7 @@ it('retains every open execution while pruning completed executions to the newes
     expect($monitor->executions()->whereNotNull('completed_at')->count())->toBe(100)
         ->and($monitor->executions()
             ->whereNotNull('completed_at')
-            ->orderByDesc('completed_at')
+            ->latest('completed_at')
             ->orderByDesc('id')
             ->pluck('id')
             ->all())->toBe($expectedCompletedIds)

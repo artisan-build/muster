@@ -399,7 +399,7 @@ final class ScheduleEventController extends Controller
     {
         $retainedIds = $monitor->executions()
             ->whereNotNull('completed_at')
-            ->orderByDesc('completed_at')
+            ->latest('completed_at')
             ->orderByDesc('id')
             ->limit(self::COMPLETED_EXECUTION_LIMIT)
             ->pluck('id');
