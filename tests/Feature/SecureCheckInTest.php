@@ -18,6 +18,7 @@ use ArtisanBuild\BuiltForCloud\CredentialPurpose;
 use ArtisanBuild\BuiltForCloud\StandaloneAccess;
 use ArtisanBuild\BuiltForCloud\SubjectType;
 use ArtisanBuild\BuiltForCloud\User;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -168,14 +169,57 @@ it('accepts the same framework-issued bearer twice and advances the monitor atom
         ->and($monitor->checkIns()->count())->toBe(2);
 });
 
-it('returns one indistinguishable denial for every credential refusal class', function (): void {
+it('samples the accepted timestamp after the scoped monitor lock is acquired', function (): void {
+    $this->travelTo('2026-09-21 12:00:00 UTC');
     $monitor = createTestMonitor();
+    $issued = issueMusterBearer('muster.check-in');
+    $lockQueryCompleted = false;
+
+    DB::listen(function (QueryExecuted $query) use (&$lockQueryCompleted): void {
+        if ($lockQueryCompleted
+            || ! str_contains($query->sql, 'monitors')
+            || ! str_contains($query->sql, 'credential_partitions')
+            || ! str_contains($query->sql, 'is_enabled')) {
+            return;
+        }
+
+        $lockQueryCompleted = true;
+        $this->travelTo('2026-09-21 12:02:00 UTC');
+    });
+
+    $this->withHeaders([
+        'Authorization' => 'Bearer '.$issued['secret'],
+        'Sec-Fetch-Site' => 'cross-site',
+    ])->postJson(route('monitor-check-ins.store', $monitor))
+        ->assertOk();
+
+    $monitor->refresh();
+    $event = $monitor->checkIns()->sole();
+
+    expect($lockQueryCompleted)->toBeTrue()
+        ->and($monitor->last_check_in_at?->toISOString())->toBe('2026-09-21T12:02:00.000000Z')
+        ->and($monitor->next_due_at?->toISOString())->toBe('2026-09-21T12:07:00.000000Z')
+        ->and($event->checked_in_at->toISOString())->toBe('2026-09-21T12:02:00.000000Z');
+});
+
+it('returns one indistinguishable denial for every credential refusal class', function (): void {
+    $denialMonitor = createTestMonitor(['name' => 'Test Created Denial Monitor']);
+    $allowedMonitor = createTestMonitor(['name' => 'Test Created Allowed Monitor']);
     $wrongPurpose = issueMusterBearer('muster.history.read');
     $expired = issueMusterBearer('muster.check-in', $wrongPurpose['user']);
     $revoked = issueMusterBearer('muster.check-in', $wrongPurpose['user']);
     $pending = issueMusterBearer('muster.check-in', $wrongPurpose['user']);
     $wrongAbility = issueMusterBearer('muster.check-in', $wrongPurpose['user']);
     $wrongScope = issueMusterBearer('muster.check-in', $wrongPurpose['user']);
+    $allowed = issueMusterBearer('muster.check-in', $wrongPurpose['user']);
+
+    $this->withHeaders([
+        'Authorization' => 'Bearer '.$allowed['secret'],
+        'Sec-Fetch-Site' => 'cross-site',
+    ])->postJson(route('monitor-check-ins.store', $allowedMonitor))
+        ->assertOk()
+        ->assertExactJson(['status' => 'ok']);
+    $this->flushHeaders();
 
     DB::table('credentials')->where('id', $expired['credential_id'])->update(['expires_at' => now()->subSecond()]);
     DB::table('credentials')->where('id', $revoked['credential_id'])->update(['revoked_at' => now()]);
@@ -187,7 +231,7 @@ it('returns one indistinguishable denial for every credential refusal class', fu
     $post = fn (?string $secret) => $this->withHeaders(array_filter([
         'Authorization' => $secret === null ? null : 'Bearer '.$secret,
         'Sec-Fetch-Site' => 'cross-site',
-    ]))->postJson(route('monitor-check-ins.store', $monitor));
+    ]))->postJson(route('monitor-check-ins.store', $denialMonitor));
 
     $responses = [
         'missing' => $post(null),
@@ -212,9 +256,11 @@ it('returns one indistinguishable denial for every credential refusal class', fu
     }
 
     expect($expectedBody)->toBe('{"message":"Unauthenticated."}')
-        ->and($monitor->refresh()->status)->toBe('pending')
-        ->and($monitor->last_check_in_at)->toBeNull()
-        ->and(CheckInEvent::query()->count())->toBe(0);
+        ->and($denialMonitor->refresh()->status)->toBe('pending')
+        ->and($denialMonitor->last_check_in_at)->toBeNull()
+        ->and($denialMonitor->checkIns()->count())->toBe(0)
+        ->and($allowedMonitor->refresh()->status)->toBe('healthy')
+        ->and($allowedMonitor->checkIns()->count())->toBe(1);
 });
 
 it('refuses unknown and disabled monitors without mutation or disclosure', function (): void {

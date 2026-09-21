@@ -29,14 +29,14 @@ final class MonitorTokenController extends Controller
             return $this->unauthorized();
         }
 
-        $acceptedAt = now();
-        $accepted = DB::transaction(function () use ($credential, $monitorId, $acceptedAt): bool {
+        $accepted = DB::transaction(function () use ($credential, $monitorId): bool {
             $monitor = $this->enabledMonitor($credential, $monitorId, true);
 
             if ($monitor === null) {
                 return false;
             }
 
+            $acceptedAt = now();
             $monitor->forceFill([
                 'status' => 'healthy',
                 'last_check_in_at' => $acceptedAt,
