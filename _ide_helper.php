@@ -24720,6 +24720,24 @@ namespace Flux {
         /**
          * @static
          */
+        public static function phoneScripts()
+        {
+            /** @var \Flux\FluxManager $instance */
+            return $instance->phoneScripts();
+        }
+
+        /**
+         * @static
+         */
+        public static function flagUrl($country)
+        {
+            /** @var \Flux\FluxManager $instance */
+            return $instance->flagUrl($country);
+        }
+
+        /**
+         * @static
+         */
         public static function classes($styles = null)
         {
             /** @var \Flux\FluxManager $instance */
@@ -24828,10 +24846,10 @@ namespace Flux {
         /**
          * @static
          */
-        public static function toast($text, $heading = null, $duration = 5000, $variant = null, $position = null, $link = null)
+        public static function toast($text, $heading = null, $duration = 5000, $variant = null, $position = null, $link = null, $action = null)
         {
             /** @var \Flux\FluxManager $instance */
-            return $instance->toast($text, $heading, $duration, $variant, $position, $link);
+            return $instance->toast($text, $heading, $duration, $variant, $position, $link, $action);
         }
 
             }

@@ -16,6 +16,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $status
  * @property CarbonImmutable|null $last_check_in_at
  * @property CarbonImmutable|null $next_due_at
+ *
+ * @mixin IdeHelperMonitor
  */
 final class Monitor extends Model
 {

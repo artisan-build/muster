@@ -27,7 +27,7 @@ final class MonitorController extends Controller
     {
         $monitor = Monitor::query()->create($request->validated());
 
-        return redirect()->route('monitors.show', $monitor);
+        return to_route('monitors.show', $monitor);
     }
 
     public function show(Monitor $monitor): View
@@ -44,20 +44,20 @@ final class MonitorController extends Controller
     {
         $monitor->update($request->validated());
 
-        return redirect()->route('monitors.show', $monitor);
+        return to_route('monitors.show', $monitor);
     }
 
     public function enable(Monitor $monitor): RedirectResponse
     {
         $monitor->forceFill(['is_enabled' => true])->save();
 
-        return redirect()->route('monitors.show', $monitor);
+        return to_route('monitors.show', $monitor);
     }
 
     public function disable(Monitor $monitor): RedirectResponse
     {
         $monitor->forceFill(['is_enabled' => false])->save();
 
-        return redirect()->route('monitors.show', $monitor);
+        return to_route('monitors.show', $monitor);
     }
 }
