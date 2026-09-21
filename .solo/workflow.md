@@ -12,24 +12,32 @@ Muster is a self-hosted heartbeat and cron monitor. Scheduled tasks and backgrou
 
 Non-goals, explicitly: no public status page at MVP (it is a later surface of this same product, not a second build); no escalation policies, on-call schedules or paging integrations; and emphatically not a metrics or log store - Hone is the telemetry product, Muster answers only whether the thing reported in.
 
-The decision-complete scope lives in `~/Herd/brain/ideas/2026-09-21-muster-prd.md`. Read it before decomposing work; it
+The decision-complete scope lives in `~/Herd/brain/ideas/2026-09-21-muster-prd.md` — read
+**Amendment 1** at the end, which changes the onboarding model; the MVP scope above it is shipped
+history. The package scope is `~/Herd/brain/ideas/2026-09-21-muster-client-prd.md`. Read it before decomposing work; it
 records which decisions are Ed's and which are brain's, so neither gets silently reopened.
 
 ## Phase And Mode
 
-- phase: greenfield
+- phase: pre-launch
 - default mode: A-autonomous
 - merge policy: merge each PR when the full gate and CI are green; no human review required per PR.
   Ed is explicitly not reviewing each PR for this build.
-- merge method: `gh pr merge --squash`, then delete the branch. **Do NOT use `--auto`** unless you
-  have confirmed a ruleset with required checks is active on this repo — with no required checks,
-  `--auto` merges immediately instead of waiting for CI.
+- merge method: `gh pr merge --squash`, then delete the branch.
+  - **Ruleset #23758577 is ACTIVE on `main`** (verified 2026-09-21): `pull_request` required,
+    required status checks `ci (8.5)` and `quality`, plus `deletion` and `non_fast_forward`
+    protection. Direct pushes to `main` are DECLINED — brain hit this landing this very file.
+    Bobbin carries the parallel ruleset #23758578.
+  - Because required checks ARE configured, `--auto` would genuinely wait for them here. Keep
+    using a manual squash on confirmed-green anyway: it is one command either way, and it keeps
+    the merge decision observable in the run log.
 
 ## Hard Gate
 
 - command: `composer ready` (ide-helper regen + rector + pint + phpstan + pest + composer audit)
 - extra suites: none
-- monorepo: no. The client package splits out later; do not pre-build a package layout.
+- monorepo: YES as of 2026-09-21. `packages/muster-client` is now in scope and splits out with
+  kibble. Supersedes the earlier "do not pre-build a package layout" line; see PRD Amendment 1.
 
 The coordinator verifies the hard gate on the committed SHA with a clean tree.
 
@@ -57,8 +65,8 @@ Fleet bindings come from `~/Herd/brain/agents.json`, resolved at spawn time via
 
 - branch naming: `feat/<slug>`, `fix/<slug>`
 - PR target repo: artisan-build/muster
-- release or split steps: none yet. The `muster-client` package splits out when there is a real
-  consumer, not before.
+- release or split steps: `packages/muster-client` is built in-repo and split out with kibble. The
+  real consumer now exists: every connected BfC app. (Ed, 2026-09-21.)
 
 ## Plan And Coordination
 
