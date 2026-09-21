@@ -37,7 +37,7 @@ nav a:hover { color: #fff; }
 .page-shell { width: min(100% - 2rem, 70rem); margin: 0 auto; padding: 4rem 0 6rem; }
 .page-heading { display: flex; align-items: end; justify-content: space-between; gap: 1.5rem; margin-bottom: 1.5rem; }
 .eyebrow { margin: 0 0 .45rem; color: #4fde97; font-size: .72rem; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
-h1 { margin: 0; font-family: Georgia, serif; font-size: clamp(2.4rem, 7vw, 4.8rem); font-weight: 400; letter-spacing: -.055em; line-height: .95; }
+h1 { margin: 0; overflow-wrap: anywhere; font-family: Georgia, serif; font-size: clamp(2.4rem, 7vw, 4.8rem); font-weight: 400; letter-spacing: -.055em; line-height: .95; }
 
 .panel { border: 1px solid #1c332c; border-radius: 1rem; background: rgba(13, 29, 25, .82); box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, .2); }
 .monitor-list { overflow: hidden; border-radius: inherit; }
@@ -45,8 +45,7 @@ h1 { margin: 0; font-family: Georgia, serif; font-size: clamp(2.4rem, 7vw, 4.8re
 .monitor-row + .monitor-row { border-top: 1px solid #1c332c; }
 .monitor-row:hover { background: rgba(79, 222, 151, .04); }
 .monitor-row span:first-child { min-width: 0; }
-.monitor-row strong, .monitor-row small { display: block; }
-.monitor-row strong { overflow: hidden; text-overflow: ellipsis; }
+.monitor-row strong, .monitor-row small { display: block; overflow-wrap: anywhere; }
 .monitor-row small { margin-top: .3rem; color: #89a49a; }
 .empty-state { padding: 3rem 1.4rem; text-align: center; color: #a8c1b8; }
 .empty-state a { color: #4fde97; }
