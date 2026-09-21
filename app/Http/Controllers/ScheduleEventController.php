@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Models\CheckInEvent;
 use App\Models\CredentialPartition;
 use App\Models\Monitor;
+use App\Models\ScheduleExecution;
 use ArtisanBuild\BuiltForCloud\BoundBearerCredential;
 use ArtisanBuild\BuiltForCloud\BoundBearerCredentialAuthenticator;
 use ArtisanBuild\BuiltForCloud\Exceptions\CredentialAuthorizationRefused;
@@ -15,10 +16,12 @@ use ArtisanBuild\BuiltForCloud\Exceptions\InvalidCredentialInput;
 use Carbon\CarbonImmutable;
 use Closure;
 use Cron\CronExpression;
+use DateTimeZone;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 final class ScheduleEventController extends Controller
@@ -53,85 +56,183 @@ final class ScheduleEventController extends Controller
         }
 
         $monitor = DB::transaction(function () use ($partition, $payload, $expectedKey): Monitor {
-            $registered = $partition->monitors()->firstOrCreate(
-                ['schedule_key' => $expectedKey],
-                [
-                    'name' => $payload['display'],
-                    'command' => $payload['command'],
-                    'display' => $payload['display'],
-                    'expression' => $payload['expression'],
-                    'cadence_seconds' => 1,
-                    'grace_seconds' => self::DEFAULT_GRACE_SECONDS,
-                    'background' => $payload['background'],
-                ],
-            );
+            $monitor = $partition->monitors()
+                ->where('schedule_key', $expectedKey)
+                ->lockForUpdate()
+                ->first();
 
-            $monitor = Monitor::query()->lockForUpdate()->findOrFail($registered->id);
+            if ($monitor === null && in_array($payload['phase'], ['finished', 'failed'], true)) {
+                throw ValidationException::withMessages([
+                    'execution_id' => 'The execution does not exist.',
+                ]);
+            }
+
+            if ($monitor === null) {
+                $registered = $partition->monitors()->firstOrCreate(
+                    ['schedule_key' => $expectedKey],
+                    [
+                        'name' => $payload['display'],
+                        'command' => $payload['command'],
+                        'display' => $payload['display'],
+                        'expression' => $payload['expression'],
+                        'timezone' => $payload['timezone'],
+                        'cadence_seconds' => 1,
+                        'grace_seconds' => self::DEFAULT_GRACE_SECONDS,
+                        'background' => $payload['background'],
+                    ],
+                );
+                $monitor = Monitor::query()->lockForUpdate()->findOrFail($registered->id);
+            }
+
             $acceptedAt = now()->toImmutable();
-            [$nextDueAt, $cadenceSeconds] = $this->expectation($payload['expression'], $acceptedAt);
-            $expressionChanged = $monitor->expression !== $payload['expression'];
-            $updates = [
-                'name' => $payload['display'],
-                'command' => $payload['command'],
-                'display' => $payload['display'],
-                'expression' => $payload['expression'],
-                'background' => $payload['background'],
-                'last_check_in_at' => $acceptedAt,
-            ];
-
-            if ($registered->wasRecentlyCreated
-                || $expressionChanged
-                || in_array($payload['phase'], ['started', 'skipped'], true)) {
-                $updates['cadence_seconds'] = $cadenceSeconds;
-                $updates['next_due_at'] = $nextDueAt;
-            }
-
-            if ($registered->wasRecentlyCreated) {
-                $updates['is_enabled'] = true;
-            }
-
-            $eventType = match ($payload['phase']) {
-                'started' => CheckInEvent::TYPE_STARTED,
-                'skipped' => CheckInEvent::TYPE_SKIPPED,
-                'failed' => CheckInEvent::TYPE_NON_ZERO_EXIT,
-                'finished' => $payload['exit_code'] === 0
-                    ? CheckInEvent::TYPE_FINISHED
-                    : CheckInEvent::TYPE_NON_ZERO_EXIT,
-            };
 
             if ($payload['phase'] === 'started') {
-                $updates['status'] = 'running';
-                $updates['last_exit_code'] = null;
-                $updates['last_runtime'] = null;
-            } elseif ($payload['phase'] === 'skipped') {
-                $updates['status'] = $monitor->status === 'running' ? 'running' : 'healthy';
-            } elseif ($eventType === CheckInEvent::TYPE_FINISHED) {
-                $updates['status'] = 'healthy';
-                $updates['last_exit_code'] = $payload['exit_code'];
-                $updates['last_runtime'] = $payload['runtime'];
-            } else {
-                $updates['status'] = 'failed';
-                $updates['last_exit_code'] = $payload['exit_code'];
-                $updates['last_runtime'] = $payload['runtime'];
+                return $this->recordStart($monitor, $payload, $acceptedAt);
             }
 
-            $monitor->forceFill($updates)->save();
-            $monitor->recordActivity([$eventType], $acceptedAt, [
-                'command' => $payload['command'],
-                'display' => $payload['display'],
-                'expression' => $payload['expression'],
-                'exit_code' => $payload['exit_code'],
-                'runtime' => $payload['runtime'],
-                'background' => $payload['background'],
-            ]);
+            if (in_array($payload['phase'], ['finished', 'failed'], true)) {
+                return $this->recordCompletion($monitor, $payload, $acceptedAt);
+            }
 
-            return $monitor;
+            return $this->recordSkip($monitor, $payload, $acceptedAt);
         });
 
         return response()->json([
             'status' => 'ok',
             'monitor_id' => $monitor->id,
         ]);
+    }
+
+    /**
+     * @param  array{key: string, command: string, display: string, expression: string, phase: 'started'|'finished'|'skipped'|'failed', exit_code: int|null, runtime: float|null, background: bool, execution_id: string|null, timezone: string}  $payload
+     */
+    private function recordStart(Monitor $monitor, array $payload, CarbonImmutable $acceptedAt): Monitor
+    {
+        $existingExecution = $monitor->executions()
+            ->where('execution_id', $payload['execution_id'])
+            ->lockForUpdate()
+            ->first();
+
+        if ($existingExecution !== null) {
+            return $monitor;
+        }
+
+        [$nextDueAt, $cadenceSeconds] = $this->expectation(
+            $payload['expression'],
+            $payload['timezone'],
+            $acceptedAt,
+        );
+        $wasMissed = $monitor->status === 'missed';
+
+        $monitor->executions()->create([
+            'execution_id' => $payload['execution_id'],
+            'status' => ScheduleExecution::STATUS_RUNNING,
+            'started_at' => $acceptedAt,
+            'background' => $payload['background'],
+            'timezone' => $payload['timezone'],
+        ]);
+        $monitor->forceFill([
+            ...$this->scheduleData($payload),
+            'status' => 'running',
+            'last_check_in_at' => $acceptedAt,
+            'next_due_at' => $nextDueAt,
+            'cadence_seconds' => $cadenceSeconds,
+            'last_exit_code' => null,
+            'last_runtime' => null,
+        ])->save();
+
+        $eventTypes = $wasMissed
+            ? [CheckInEvent::TYPE_RECOVERED, CheckInEvent::TYPE_STARTED]
+            : [CheckInEvent::TYPE_STARTED];
+        $monitor->recordActivity($eventTypes, $acceptedAt, $this->eventData($payload));
+
+        return $monitor;
+    }
+
+    /**
+     * @param  array{key: string, command: string, display: string, expression: string, phase: 'started'|'finished'|'skipped'|'failed', exit_code: int|null, runtime: float|null, background: bool, execution_id: string|null, timezone: string}  $payload
+     */
+    private function recordCompletion(Monitor $monitor, array $payload, CarbonImmutable $acceptedAt): Monitor
+    {
+        $execution = $monitor->executions()
+            ->where('execution_id', $payload['execution_id'])
+            ->lockForUpdate()
+            ->first();
+
+        if ($execution === null) {
+            throw ValidationException::withMessages([
+                'execution_id' => 'The execution does not exist.',
+            ]);
+        }
+
+        if ($execution->status !== ScheduleExecution::STATUS_RUNNING) {
+            return $monitor;
+        }
+
+        if ($execution->background !== $payload['background']) {
+            throw ValidationException::withMessages([
+                'background' => 'The background value must match the started execution.',
+            ]);
+        }
+
+        $eventType = $payload['phase'] === 'finished' && $payload['exit_code'] === 0
+            ? CheckInEvent::TYPE_FINISHED
+            : CheckInEvent::TYPE_NON_ZERO_EXIT;
+        $executionStatus = $eventType === CheckInEvent::TYPE_FINISHED
+            ? ScheduleExecution::STATUS_FINISHED
+            : ScheduleExecution::STATUS_FAILED;
+        $execution->forceFill([
+            'status' => $executionStatus,
+            'completed_at' => $acceptedAt,
+            'runtime' => $payload['runtime'],
+            'exit_code' => $payload['exit_code'],
+        ])->save();
+
+        $hasOpenExecution = $monitor->executions()
+            ->where('status', ScheduleExecution::STATUS_RUNNING)
+            ->exists();
+        $updates = [
+            ...$this->scheduleData($payload),
+            'status' => $eventType === CheckInEvent::TYPE_FINISHED
+                ? ($hasOpenExecution ? 'running' : 'healthy')
+                : 'failed',
+            'last_check_in_at' => $acceptedAt,
+            'last_exit_code' => $payload['exit_code'],
+            'last_runtime' => $payload['runtime'],
+        ];
+
+        if ($monitor->expression !== $payload['expression'] || $monitor->timezone !== $payload['timezone']) {
+            [$updates['next_due_at'], $updates['cadence_seconds']] = $this->expectation(
+                $payload['expression'],
+                $payload['timezone'],
+                $acceptedAt,
+            );
+        }
+
+        $monitor->forceFill($updates)->save();
+        $monitor->recordActivity([$eventType], $acceptedAt, $this->eventData($payload));
+
+        return $monitor;
+    }
+
+    /**
+     * @param  array{key: string, command: string, display: string, expression: string, phase: 'started'|'finished'|'skipped'|'failed', exit_code: int|null, runtime: float|null, background: bool, execution_id: string|null, timezone: string}  $payload
+     */
+    private function recordSkip(Monitor $monitor, array $payload, CarbonImmutable $acceptedAt): Monitor
+    {
+        [$nextDueAt, $cadenceSeconds] = $this->expectation(
+            $payload['expression'],
+            $payload['timezone'],
+            $acceptedAt,
+        );
+        $monitor->forceFill([
+            ...$this->scheduleData($payload),
+            'next_due_at' => $nextDueAt,
+            'cadence_seconds' => $cadenceSeconds,
+        ])->save();
+        $monitor->recordActivity([CheckInEvent::TYPE_SKIPPED], $acceptedAt, $this->eventData($payload));
+
+        return $monitor;
     }
 
     /**
@@ -143,7 +244,9 @@ final class ScheduleEventController extends Controller
      *     phase: 'started'|'finished'|'skipped'|'failed',
      *     exit_code: int|null,
      *     runtime: float|null,
-     *     background: bool
+     *     background: bool,
+     *     execution_id: string|null,
+     *     timezone: string
      * }
      */
     private function validatedPayload(Request $request): array
@@ -157,6 +260,8 @@ final class ScheduleEventController extends Controller
             'exit_code',
             'runtime',
             'background',
+            'execution_id',
+            'timezone',
         ];
         $validator = Validator::make($request->all(), [
             'key' => ['required', 'string', 'size:64', 'regex:/\A[a-f0-9]{64}\z/'],
@@ -176,6 +281,27 @@ final class ScheduleEventController extends Controller
             'exit_code' => ['nullable', 'integer'],
             'runtime' => ['nullable', 'numeric', 'min:0'],
             'background' => ['required', 'boolean'],
+            'execution_id' => [
+                'nullable',
+                'string',
+                'max:36',
+                static function (string $attribute, mixed $value, Closure $fail): void {
+                    if (is_string($value) && ! Str::isUlid($value) && ! Str::isUuid($value)) {
+                        $fail('The execution id must be a valid ULID or UUID.');
+                    }
+                },
+            ],
+            'timezone' => [
+                'nullable',
+                'string',
+                'max:255',
+                static function (string $attribute, mixed $value, Closure $fail): void {
+                    if (is_string($value)
+                        && ! in_array($value, DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC), true)) {
+                        $fail('The timezone must be a valid IANA timezone.');
+                    }
+                },
+            ],
             'output' => ['prohibited'],
         ]);
 
@@ -190,6 +316,11 @@ final class ScheduleEventController extends Controller
 
             $phase = $request->input('phase');
             $background = $request->boolean('background');
+
+            if (in_array($phase, ['started', 'finished', 'failed'], true)
+                && $request->input('execution_id') === null) {
+                $validator->errors()->add('execution_id', 'The execution id field is required for this phase.');
+            }
 
             if ($phase === 'finished' && $request->input('exit_code') === null) {
                 $validator->errors()->add('exit_code', 'The exit code field is required when phase is finished.');
@@ -216,22 +347,62 @@ final class ScheduleEventController extends Controller
             }
         });
 
-        /** @var array{key: string, command: string, display: string, expression: string, phase: 'started'|'finished'|'skipped'|'failed', exit_code?: int|null, runtime?: int|float|null, background: bool} $validated */
+        /** @var array{key: string, command: string, display: string, expression: string, phase: 'started'|'finished'|'skipped'|'failed', exit_code?: int|null, runtime?: int|float|null, background: bool, execution_id?: string|null, timezone?: string|null} $validated */
         $validated = $validator->validate();
 
         return [
             ...$validated,
             'exit_code' => $validated['exit_code'] ?? null,
             'runtime' => isset($validated['runtime']) ? (float) $validated['runtime'] : null,
+            'execution_id' => $validated['execution_id'] ?? null,
+            'timezone' => $validated['timezone'] ?? 'UTC',
+        ];
+    }
+
+    /**
+     * @param  array{command: string, display: string, expression: string, background: bool, timezone: string}  $payload
+     * @return array{name: string, command: string, display: string, expression: string, background: bool, timezone: string}
+     */
+    private function scheduleData(array $payload): array
+    {
+        return [
+            'name' => $payload['display'],
+            'command' => $payload['command'],
+            'display' => $payload['display'],
+            'expression' => $payload['expression'],
+            'background' => $payload['background'],
+            'timezone' => $payload['timezone'],
+        ];
+    }
+
+    /**
+     * @param  array{command: string, display: string, expression: string, exit_code: int|null, runtime: float|null, background: bool, execution_id: string|null, timezone: string}  $payload
+     * @return array{command: string, display: string, expression: string, exit_code: int|null, runtime: float|null, background: bool, execution_id: string|null, timezone: string}
+     */
+    private function eventData(array $payload): array
+    {
+        return [
+            'command' => $payload['command'],
+            'display' => $payload['display'],
+            'expression' => $payload['expression'],
+            'exit_code' => $payload['exit_code'],
+            'runtime' => $payload['runtime'],
+            'background' => $payload['background'],
+            'execution_id' => $payload['execution_id'],
+            'timezone' => $payload['timezone'],
         ];
     }
 
     /** @return array{CarbonImmutable, int} */
-    private function expectation(string $expression, CarbonImmutable $acceptedAt): array
+    private function expectation(string $expression, string $timezone, CarbonImmutable $acceptedAt): array
     {
         $cron = new CronExpression($expression);
-        $nextDueAt = CarbonImmutable::instance($cron->getNextRunDate($acceptedAt, 0, false, 'UTC'));
-        $followingDueAt = CarbonImmutable::instance($cron->getNextRunDate($nextDueAt, 0, false, 'UTC'));
+        $nextDueAt = CarbonImmutable::instance(
+            $cron->getNextRunDate($acceptedAt, 0, false, $timezone),
+        )->utc();
+        $followingDueAt = CarbonImmutable::instance(
+            $cron->getNextRunDate($nextDueAt, 0, false, $timezone),
+        )->utc();
 
         return [$nextDueAt, max(1, (int) $nextDueAt->diffInSeconds($followingDueAt))];
     }

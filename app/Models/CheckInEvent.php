@@ -18,6 +18,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $command
  * @property string|null $display
  * @property string|null $expression
+ * @property string|null $execution_id
+ * @property string|null $timezone
  * @property int|null $exit_code
  * @property float|null $runtime
  * @property bool $background
@@ -54,6 +56,8 @@ final class CheckInEvent extends Model
         'command',
         'display',
         'expression',
+        'execution_id',
+        'timezone',
         'exit_code',
         'runtime',
         'background',

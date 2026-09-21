@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $command
  * @property string|null $display
  * @property string|null $expression
+ * @property string|null $timezone
  * @property int $cadence_seconds
  * @property int $grace_seconds
  * @property bool $is_enabled
@@ -45,6 +46,7 @@ final class Monitor extends Model
         'command',
         'display',
         'expression',
+        'timezone',
         'cadence_seconds',
         'grace_seconds',
         'background',
@@ -82,6 +84,12 @@ final class Monitor extends Model
     public function events(): HasMany
     {
         return $this->hasMany(CheckInEvent::class);
+    }
+
+    /** @return HasMany<ScheduleExecution, $this> */
+    public function executions(): HasMany
+    {
+        return $this->hasMany(ScheduleExecution::class);
     }
 
     /**

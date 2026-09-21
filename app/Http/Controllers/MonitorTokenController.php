@@ -82,6 +82,8 @@ final class MonitorTokenController extends Controller
                     'command' => $event->command,
                     'display' => $event->display,
                     'expression' => $event->expression,
+                    'execution_id' => $event->execution_id,
+                    'timezone' => $event->timezone,
                     'exit_code' => $event->exit_code,
                     'runtime' => $event->runtime,
                     'background' => $event->background,
