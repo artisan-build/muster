@@ -11,17 +11,27 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * @property int $id
  * @property int $monitor_id
- * @property CarbonImmutable $checked_in_at
+ * @property string $event_type
+ * @property CarbonImmutable $occurred_at
  *
  * @mixin IdeHelperCheckInEvent
  */
 final class CheckInEvent extends Model
 {
+    public const string TYPE_CHECK_IN = 'check_in';
+
+    public const string TYPE_LATE = 'late';
+
+    public const string TYPE_MISSED = 'missed';
+
+    public const string TYPE_RECOVERED = 'recovered';
+
     public $timestamps = false;
 
     /** @var list<string> */
     protected $fillable = [
-        'checked_in_at',
+        'event_type',
+        'occurred_at',
     ];
 
     /** @return BelongsTo<Monitor, $this> */
@@ -34,7 +44,7 @@ final class CheckInEvent extends Model
     protected function casts(): array
     {
         return [
-            'checked_in_at' => 'immutable_datetime',
+            'occurred_at' => 'immutable_datetime',
         ];
     }
 }

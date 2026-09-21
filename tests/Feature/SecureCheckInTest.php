@@ -158,7 +158,7 @@ it('accepts the same framework-issued bearer twice and advances the monitor atom
     expect($monitor->status)->toBe('healthy')
         ->and($monitor->last_check_in_at?->toISOString())->toBe('2026-09-21T12:00:00.000000Z')
         ->and($monitor->next_due_at?->toISOString())->toBe('2026-09-21T12:05:00.000000Z')
-        ->and($monitor->checkIns()->count())->toBe(1);
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_CHECK_IN)->count())->toBe(1);
 
     $this->travelTo('2026-09-21 12:10:00 UTC');
     $request()->assertOk()->assertExactJson(['status' => 'ok']);
@@ -166,7 +166,7 @@ it('accepts the same framework-issued bearer twice and advances the monitor atom
 
     expect($monitor->last_check_in_at?->toISOString())->toBe('2026-09-21T12:10:00.000000Z')
         ->and($monitor->next_due_at?->toISOString())->toBe('2026-09-21T12:15:00.000000Z')
-        ->and($monitor->checkIns()->count())->toBe(2);
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_CHECK_IN)->count())->toBe(2);
 });
 
 it('samples the accepted timestamp after the scoped monitor lock is acquired', function (): void {
@@ -194,12 +194,13 @@ it('samples the accepted timestamp after the scoped monitor lock is acquired', f
         ->assertOk();
 
     $monitor->refresh();
-    $event = $monitor->checkIns()->sole();
+    $event = $monitor->events()->sole();
 
     expect($lockQueryCompleted)->toBeTrue()
         ->and($monitor->last_check_in_at?->toISOString())->toBe('2026-09-21T12:02:00.000000Z')
         ->and($monitor->next_due_at?->toISOString())->toBe('2026-09-21T12:07:00.000000Z')
-        ->and($event->checked_in_at->toISOString())->toBe('2026-09-21T12:02:00.000000Z');
+        ->and($event->event_type)->toBe(CheckInEvent::TYPE_CHECK_IN)
+        ->and($event->occurred_at->toISOString())->toBe('2026-09-21T12:02:00.000000Z');
 });
 
 it('returns one indistinguishable denial for every credential refusal class', function (): void {
@@ -258,9 +259,9 @@ it('returns one indistinguishable denial for every credential refusal class', fu
     expect($expectedBody)->toBe('{"message":"Unauthenticated."}')
         ->and($denialMonitor->refresh()->status)->toBe('pending')
         ->and($denialMonitor->last_check_in_at)->toBeNull()
-        ->and($denialMonitor->checkIns()->count())->toBe(0)
+        ->and($denialMonitor->events()->count())->toBe(0)
         ->and($allowedMonitor->refresh()->status)->toBe('healthy')
-        ->and($allowedMonitor->checkIns()->count())->toBe(1);
+        ->and($allowedMonitor->events()->count())->toBe(1);
 });
 
 it('refuses unknown and disabled monitors without mutation or disclosure', function (): void {
@@ -299,7 +300,10 @@ it('isolates check-ins and history between credential subject partitions', funct
         'cadence_seconds' => 600,
         'grace_seconds' => 60,
     ]);
-    $teamBEvent = $teamBMonitor->checkIns()->create(['checked_in_at' => '2026-09-21 12:34:56']);
+    $teamBEvent = $teamBMonitor->events()->create([
+        'event_type' => CheckInEvent::TYPE_CHECK_IN,
+        'occurred_at' => '2026-09-21 12:34:56',
+    ]);
     $checkIn = issueMusterBearer('muster.check-in');
     $history = issueMusterBearer('muster.history.read', $checkIn['user']);
 
@@ -322,10 +326,10 @@ it('isolates check-ins and history between credential subject partitions', funct
 
     expect($foreignCheckIn->getContent())->toBe($unknownCheckIn->getContent())
         ->and($foreignHistory->getContent())->toBe($unknownHistory->getContent())
-        ->and($foreignHistory->getContent())->not->toContain($teamBEvent->checked_in_at->toISOString())
+        ->and($foreignHistory->getContent())->not->toContain($teamBEvent->occurred_at->toISOString())
         ->and($teamAMonitor->refresh()->last_check_in_at)->toBeNull()
         ->and($teamBMonitor->refresh()->last_check_in_at)->toBeNull()
-        ->and($teamBMonitor->checkIns()->count())->toBe(1);
+        ->and($teamBMonitor->events()->count())->toBe(1);
 });
 
 it('retains the newest 100 events and renders test-created history to authenticated humans', function (): void {
@@ -333,12 +337,13 @@ it('retains the newest 100 events and renders test-created history to authentica
     $this->travelTo('2026-09-21 14:00:00 UTC');
 
     foreach (range(0, 99) as $minutesAgo) {
-        $monitor->checkIns()->create([
-            'checked_in_at' => now()->subMinutes(100 - $minutesAgo),
+        $monitor->events()->create([
+            'event_type' => CheckInEvent::TYPE_CHECK_IN,
+            'occurred_at' => now()->subMinutes(100 - $minutesAgo),
         ]);
     }
 
-    $oldestId = $monitor->checkIns()->oldest('checked_in_at')->value('id');
+    $oldestId = $monitor->events()->oldest('occurred_at')->value('id');
     $checkIn = issueMusterBearer('muster.check-in');
     $history = issueMusterBearer('muster.history.read', $checkIn['user']);
 
@@ -348,14 +353,15 @@ it('retains the newest 100 events and renders test-created history to authentica
     ])->postJson(route('monitor-check-ins.store', $monitor))
         ->assertOk();
 
-    expect($monitor->checkIns()->count())->toBe(100)
-        ->and($monitor->checkIns()->whereKey($oldestId)->exists())->toBeFalse();
+    expect($monitor->events()->count())->toBe(100)
+        ->and($monitor->events()->whereKey($oldestId)->exists())->toBeFalse();
 
     $this->withToken($history['secret'])
         ->getJson(route('monitor-check-ins.index', $monitor))
         ->assertOk()
         ->assertJsonCount(100, 'events')
-        ->assertJsonPath('events.0.checked_in_at', '2026-09-21T14:00:00.000000Z');
+        ->assertJsonPath('events.0.type', CheckInEvent::TYPE_CHECK_IN)
+        ->assertJsonPath('events.0.occurred_at', '2026-09-21T14:00:00.000000Z');
 
     $this->withToken($checkIn['secret'])
         ->getJson(route('monitor-check-ins.index', $monitor))
@@ -365,12 +371,14 @@ it('retains the newest 100 events and renders test-created history to authentica
     signInForSecureCheckIns();
     $this->get(route('monitors.show', $monitor))
         ->assertOk()
-        ->assertSee('data-testid="monitor-check-in-history"', false)
-        ->assertSee('data-testid="monitor-check-in-events"', false)
+        ->assertSee('data-testid="monitor-activity-history"', false)
+        ->assertSee('data-testid="monitor-activity-events"', false)
+        ->assertSee('data-testid="monitor-activity-event"', false)
+        ->assertSee('Check In')
         ->assertSee('datetime="2026-09-21T14:00:00.000000Z"', false)
         ->assertSeeInOrder([
             'datetime="2026-09-21T14:00:00.000000Z"',
             'datetime="2026-09-21T13:59:00.000000Z"',
         ], false)
-        ->assertDontSee('No check-ins received yet.');
+        ->assertDontSee('No activity recorded yet.');
 });

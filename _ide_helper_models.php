@@ -15,14 +15,16 @@ namespace App\Models{
 /**
  * @property int $id
  * @property int $monitor_id
- * @property CarbonImmutable $checked_in_at
+ * @property string $event_type
+ * @property CarbonImmutable $occurred_at
  * @property-read \App\Models\Monitor $monitor
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent query()
- * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereCheckedInAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereEventType($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereId($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereMonitorId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereOccurredAt($value)
  * @mixin \Eloquent
  */
 	#[\AllowDynamicProperties]
@@ -73,9 +75,9 @@ namespace App\Models{
  * @property CarbonImmutable|null $next_due_at
  * @property \Carbon\CarbonImmutable|null $created_at
  * @property \Carbon\CarbonImmutable|null $updated_at
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\CheckInEvent> $checkIns
- * @property-read int|null $check_ins_count
  * @property-read \App\Models\CredentialPartition|null $credentialPartition
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\CheckInEvent> $events
+ * @property-read int|null $events_count
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor query()

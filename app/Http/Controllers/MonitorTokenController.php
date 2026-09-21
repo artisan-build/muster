@@ -37,24 +37,17 @@ final class MonitorTokenController extends Controller
             }
 
             $acceptedAt = now();
+            $wasMissed = $monitor->status === 'missed';
             $monitor->forceFill([
                 'status' => 'healthy',
                 'last_check_in_at' => $acceptedAt,
                 'next_due_at' => $acceptedAt->addSeconds($monitor->cadence_seconds),
             ])->save();
 
-            $monitor->checkIns()->create(['checked_in_at' => $acceptedAt]);
-
-            $retainedIds = $monitor->checkIns()
-                ->latest('checked_in_at')
-                ->orderByDesc('id')
-                ->limit(100)
-                ->pluck('id');
-
-            CheckInEvent::query()
-                ->where('monitor_id', $monitor->id)
-                ->whereNotIn('id', $retainedIds)
-                ->delete();
+            $eventTypes = $wasMissed
+                ? [CheckInEvent::TYPE_RECOVERED, CheckInEvent::TYPE_CHECK_IN]
+                : [CheckInEvent::TYPE_CHECK_IN];
+            $monitor->recordActivity($eventTypes, $acceptedAt);
 
             return true;
         });
@@ -79,12 +72,13 @@ final class MonitorTokenController extends Controller
         }
 
         return response()->json([
-            'events' => $monitor->checkIns()
-                ->latest('checked_in_at')
+            'events' => $monitor->events()
+                ->latest('occurred_at')
                 ->orderByDesc('id')
                 ->get()
                 ->map(static fn (CheckInEvent $event): array => [
-                    'checked_in_at' => $event->checked_in_at->toISOString(),
+                    'type' => $event->event_type,
+                    'occurred_at' => $event->occurred_at->toISOString(),
                 ])
                 ->all(),
         ]);

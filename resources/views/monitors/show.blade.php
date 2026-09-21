@@ -39,18 +39,19 @@
         </aside>
     </section>
 
-    <section class="panel" data-testid="monitor-check-in-history">
+    <section class="panel" data-testid="monitor-activity-history">
         <p class="eyebrow">Recent activity</p>
-        <h2>Check-in history</h2>
+        <h2>Activity history</h2>
 
-        @if($monitor->checkIns->isEmpty())
-            <p>No check-ins received yet.</p>
+        @if($monitor->events->isEmpty())
+            <p>No activity recorded yet.</p>
         @else
-            <ol data-testid="monitor-check-in-events">
-                @foreach($monitor->checkIns as $event)
-                    <li>
-                        <time datetime="{{ $event->checked_in_at->toISOString() }}">
-                            {{ $event->checked_in_at->toDayDateTimeString() }}
+            <ol data-testid="monitor-activity-events">
+                @foreach($monitor->events as $event)
+                    <li data-testid="monitor-activity-event">
+                        <span>{{ str($event->event_type)->replace('_', ' ')->headline() }}</span>
+                        <time datetime="{{ $event->occurred_at->toISOString() }}">
+                            {{ $event->occurred_at->toDayDateTimeString() }}
                         </time>
                     </li>
                 @endforeach

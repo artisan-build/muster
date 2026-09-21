@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Models;
 
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -51,9 +53,32 @@ final class Monitor extends Model
     }
 
     /** @return HasMany<CheckInEvent, $this> */
-    public function checkIns(): HasMany
+    public function events(): HasMany
     {
         return $this->hasMany(CheckInEvent::class);
+    }
+
+    /** @param list<string> $eventTypes */
+    public function recordActivity(array $eventTypes, CarbonInterface $occurredAt): void
+    {
+        foreach ($eventTypes as $eventType) {
+            $this->events()->create([
+                'event_type' => $eventType,
+                'occurred_at' => $occurredAt,
+            ]);
+        }
+
+        /** @var Collection<int, CheckInEvent> $retainedEvents */
+        $retainedEvents = $this->events()
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('id')
+            ->limit(100)
+            ->get(['id']);
+
+        CheckInEvent::query()
+            ->where('monitor_id', $this->id)
+            ->whereNotIn('id', $retainedEvents->modelKeys())
+            ->delete();
     }
 
     /** @return array<string, string> */
