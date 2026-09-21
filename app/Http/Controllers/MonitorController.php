@@ -33,8 +33,8 @@ final class MonitorController extends Controller
 
     public function show(Monitor $monitor): View
     {
-        $monitor->load(['checkIns' => fn ($query) => $query
-            ->orderByDesc('checked_in_at')
+        $monitor->load(['events' => fn ($query) => $query
+            ->orderByDesc('occurred_at')
             ->orderByDesc('id')]);
 
         return view('monitors.show', ['monitor' => $monitor]);
