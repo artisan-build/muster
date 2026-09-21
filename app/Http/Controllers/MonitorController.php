@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Http\Requests\UpsertMonitorRequest;
+use App\Models\CredentialPartition;
 use App\Models\Monitor;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
@@ -25,13 +26,17 @@ final class MonitorController extends Controller
 
     public function store(UpsertMonitorRequest $request): RedirectResponse
     {
-        $monitor = Monitor::query()->create($request->validated());
+        $monitor = CredentialPartition::local()->monitors()->create($request->validated());
 
         return to_route('monitors.show', $monitor);
     }
 
     public function show(Monitor $monitor): View
     {
+        $monitor->load(['checkIns' => fn ($query) => $query
+            ->orderByDesc('checked_in_at')
+            ->orderByDesc('id')]);
+
         return view('monitors.show', ['monitor' => $monitor]);
     }
 

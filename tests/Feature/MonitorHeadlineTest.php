@@ -6,39 +6,83 @@ use App\BuiltForCloud\MonitorHeadlineLabel;
 use App\BuiltForCloud\MusterCredentialDeclaration;
 use App\Models\Monitor;
 use ArtisanBuild\BuiltForCloud\Contracts\CredentialDeclaration;
-use ArtisanBuild\BuiltForCloud\Credential;
-use ArtisanBuild\BuiltForCloud\CredentialKind;
 use ArtisanBuild\BuiltForCloud\CredentialPurpose;
 use ArtisanBuild\BuiltForCloud\CredentialStatus;
 use ArtisanBuild\BuiltForCloud\OperatorAbility;
 use ArtisanBuild\BuiltForCloud\SubjectType;
 use ArtisanBuild\BuiltForCloud\Testing\ContractAssertions;
-use ArtisanBuild\BuiltForCloud\Vitals\CollectVitals;
+use ArtisanBuild\BuiltForCloud\Testing\WithCredentials;
 use Illuminate\Http\Request;
-use Illuminate\Testing\TestResponse;
 
-uses(ContractAssertions::class);
+uses(ContractAssertions::class, WithCredentials::class);
 
-it('refuses credential authorization until the check-in policy is implemented', function (): void {
-    $credential = new Credential([
-        'kind' => CredentialKind::Bearer,
+it('authorizes only the active least-privilege operator dashboard shape', function (): void {
+    $reader = $this->mintCredential([
         'purpose' => CredentialPurpose::DashboardMetadata,
         'subject_type' => SubjectType::Operator,
         'subject_ref' => 'test-created-dashboard-reader',
         'abilities' => [OperatorAbility::MetadataRead->value],
-        'status' => CredentialStatus::Active,
+    ]);
+    $combined = $this->mintCredential([
+        'purpose' => CredentialPurpose::DashboardMetadata,
+        'subject_type' => SubjectType::Operator,
+        'subject_ref' => 'test-created-combined-dashboard-reader',
+        'abilities' => [OperatorAbility::MetadataRead->value, OperatorAbility::CredentialRead->value],
+    ]);
+    $wrongPurpose = $this->mintCredential([
+        'purpose' => CredentialPurpose::OperatorManagement,
+        'subject_type' => SubjectType::Operator,
+        'subject_ref' => 'test-created-wrong-purpose-reader',
+        'abilities' => [OperatorAbility::MetadataRead->value],
+    ]);
+    $pending = $this->mintCredential([
+        'purpose' => CredentialPurpose::DashboardMetadata,
+        'subject_type' => SubjectType::Operator,
+        'subject_ref' => 'test-created-pending-dashboard-reader',
+        'abilities' => [OperatorAbility::MetadataRead->value],
+        'status' => CredentialStatus::Pending,
+    ]);
+    $revoked = $this->mintCredential([
+        'purpose' => CredentialPurpose::DashboardMetadata,
+        'subject_type' => SubjectType::Operator,
+        'subject_ref' => 'test-created-revoked-dashboard-reader',
+        'abilities' => [OperatorAbility::MetadataRead->value],
+        'revoked_at' => now(),
+    ]);
+    $expired = $this->mintCredential([
+        'purpose' => CredentialPurpose::DashboardMetadata,
+        'subject_type' => SubjectType::Operator,
+        'subject_ref' => 'test-created-expired-dashboard-reader',
+        'abilities' => [OperatorAbility::MetadataRead->value],
+        'expires_at' => now()->subSecond(),
     ]);
     $declaration = resolve(CredentialDeclaration::class);
+    $request = Request::create('/bfc/console/vitals');
 
     expect($declaration)->toBeInstanceOf(MusterCredentialDeclaration::class)
         ->and($declaration->authorize(
-            $credential,
+            $reader->credential,
+            null,
+            $request,
+        ))->toBeTrue()
+        ->and($declaration->authorize(
+            $reader->credential,
             OperatorAbility::MetadataRead->value,
-            Request::create('/bfc/console/vitals'),
-        ))->toBeFalse();
+            $request,
+        ))->toBeTrue()
+        ->and($declaration->authorize(
+            $reader->credential,
+            OperatorAbility::CredentialRead->value,
+            $request,
+        ))->toBeFalse()
+        ->and($declaration->authorize($combined->credential, null, $request))->toBeFalse()
+        ->and($declaration->authorize($wrongPurpose->credential, null, $request))->toBeFalse()
+        ->and($declaration->authorize($pending->credential, null, $request))->toBeFalse()
+        ->and($declaration->authorize($revoked->credential, null, $request))->toBeFalse()
+        ->and($declaration->authorize($expired->credential, null, $request))->toBeFalse();
 });
 
-it('reports only enabled monitors through the declared bounded headline', function (): void {
+it('serves the enabled-only headline through the real package guard and vitals route', function (): void {
     foreach (['Test Created API Sync', 'Test Created Invoice Sweep'] as $name) {
         Monitor::query()->create([
             'name' => $name,
@@ -57,16 +101,39 @@ it('reports only enabled monitors through the declared bounded headline', functi
     expect(resolve(CredentialDeclaration::class))->toBeInstanceOf(MusterCredentialDeclaration::class)
         ->and(MusterCredentialDeclaration::HEADLINE_VOCABULARY)->toBe(MonitorHeadlineLabel::class);
 
-    $payload = resolve(CollectVitals::class)();
-    $headline = $payload->toArray()['headline'];
-
-    expect($headline)->toBe([
-        'value' => 2,
-        'label' => MonitorHeadlineLabel::EnabledMonitors->value,
-        'unit' => 'count',
+    $reader = $this->mintCredential([
+        'purpose' => CredentialPurpose::DashboardMetadata,
+        'subject_type' => SubjectType::Operator,
+        'subject_ref' => 'test-created-live-vitals-reader',
+        'abilities' => [OperatorAbility::MetadataRead->value],
+    ]);
+    $combined = $this->mintCredential([
+        'purpose' => CredentialPurpose::DashboardMetadata,
+        'subject_type' => SubjectType::Operator,
+        'subject_ref' => 'test-created-overprivileged-vitals-reader',
+        'abilities' => [OperatorAbility::MetadataRead->value, OperatorAbility::CredentialRead->value],
+    ]);
+    $wrongPurpose = $this->mintCredential([
+        'purpose' => CredentialPurpose::OperatorManagement,
+        'subject_type' => SubjectType::Operator,
+        'subject_ref' => 'test-created-management-reader',
+        'abilities' => [OperatorAbility::MetadataRead->value],
     ]);
 
-    $response = TestResponse::fromBaseResponse(response()->json($payload->toArray()));
+    $response = $this->getJson('/bfc/console/vitals', [
+        'Authorization' => $reader->bearerHeader(),
+    ])->assertOk()
+        ->assertJsonPath('headline.value', 2)
+        ->assertJsonPath('headline.label', MonitorHeadlineLabel::EnabledMonitors->value)
+        ->assertJsonPath('headline.unit', 'count');
+
+    $this->getJson('/bfc/console/vitals', [
+        'Authorization' => $combined->bearerHeader(),
+    ])->assertForbidden();
+    $this->getJson('/bfc/console/vitals', [
+        'Authorization' => $wrongPurpose->bearerHeader(),
+    ])->assertUnauthorized();
+    $this->getJson('/bfc/console/vitals')->assertUnauthorized();
 
     $this->assertBuiltForCloudMetadataEndpoint($response, 'GET /bfc/console/vitals');
 });

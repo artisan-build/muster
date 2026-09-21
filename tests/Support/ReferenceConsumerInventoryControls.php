@@ -108,6 +108,42 @@ PHP,
                     'config/auth.php' => "<?php return ['guards' => [], 'providers' => []];",
                 ],
             ],
+            'extra human session guard' => [
+                'families' => ['foreign_human_guards'],
+                'files' => [
+                    'config/auth.php' => <<<'PHP'
+<?php
+
+use ArtisanBuild\BuiltForCloud\User;
+
+return [
+    'guards' => [
+        'web' => ['driver' => 'session', 'provider' => 'users'],
+        'admin' => ['driver' => 'session', 'provider' => 'users'],
+    ],
+    'providers' => ['users' => ['driver' => 'eloquent', 'model' => User::class]],
+];
+PHP,
+                ],
+            ],
+            'malformed package credential guard' => [
+                'families' => ['foreign_human_guards'],
+                'files' => [
+                    'config/auth.php' => <<<'PHP'
+<?php
+
+use ArtisanBuild\BuiltForCloud\User;
+
+return [
+    'guards' => [
+        'web' => ['driver' => 'session', 'provider' => 'users'],
+        'bfc' => ['driver' => 'session', 'provider' => 'users'],
+    ],
+    'providers' => ['users' => ['driver' => 'eloquent', 'model' => User::class]],
+];
+PHP,
+                ],
+            ],
             'redirect root route' => [
                 'families' => ['starter_root_collision'],
                 'files' => [

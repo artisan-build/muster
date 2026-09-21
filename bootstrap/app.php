@@ -23,6 +23,10 @@ return Application::configure(basePath: dirname(__DIR__))
         OptimizeTailwind::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->validateCsrfTokens(except: [
+            'api/monitors/*/check-ins',
+        ]);
+
         $middleware->prependToPriorityList(
             SubstituteBindings::class,
             EnsureUserIsAuthenticated::class,

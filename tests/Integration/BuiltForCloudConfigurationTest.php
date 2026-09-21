@@ -22,6 +22,8 @@ it('matches the canonical Muster manifest and purpose contracts', function (): v
 
     expect(resolve(AppPurposeRegistry::class)->purpose('muster.check-in'))
         ->toBe(CredentialPurpose::Consumption)
+        ->and(resolve(AppPurposeRegistry::class)->purpose('muster.history.read'))
+        ->toBe(CredentialPurpose::Consumption)
         ->and(config('built-for-cloud.ui'))->toBe([
             'landing_page' => true,
             'member_management' => true,
@@ -29,7 +31,7 @@ it('matches the canonical Muster manifest and purpose contracts', function (): v
             'installation_credentials' => true,
             'session_management' => true,
             'managed_transitions' => true,
-            'credential_purposes' => ['muster.check-in'],
+            'credential_purposes' => ['muster.check-in', 'muster.history.read'],
         ]);
 });
 
@@ -56,9 +58,10 @@ it('merges package defaults and auto-discovers the released provider', function 
         'installation_credentials' => true,
         'session_management' => true,
         'managed_transitions' => true,
-        'credential_purposes' => ['muster.check-in'],
+        'credential_purposes' => ['muster.check-in', 'muster.history.read'],
     ])->and(config('built-for-cloud.product'))->toBe(config('app.name'))
         ->and(config('built-for-cloud.credentials.guard'))->toBe('bfc')
+        ->and(config('auth.guards.bfc'))->toBe(['driver' => 'bfc', 'provider' => 'users'])
         ->and(config('auth.defaults.guard'))->toBe('web')
         ->and(config('auth.providers.users.model'))->toBe(User::class)
         ->and(app()->getLoadedProviders())->toHaveKey(BuiltForCloudServiceProvider::class, true)
@@ -75,6 +78,9 @@ it('runs fresh package-owned migrations on sqlite', function (): void {
         ->and(Schema::hasTable('bfc_authority'))->toBeTrue()
         ->and(Schema::hasTable('credentials'))->toBeTrue()
         ->and(Schema::hasTable('monitors'))->toBeTrue()
+        ->and(Schema::hasTable('credential_partitions'))->toBeTrue()
+        ->and(Schema::hasTable('check_in_events'))->toBeTrue()
+        ->and(Schema::hasColumn('monitors', 'credential_partition_id'))->toBeTrue()
         ->and(Schema::hasColumn('users', 'normalized_email'))->toBeTrue()
         ->and(glob(database_path('migrations/*users*')) ?: [])->toBe([])
         ->and(class_exists('App\\Models\\User'))->toBeFalse();

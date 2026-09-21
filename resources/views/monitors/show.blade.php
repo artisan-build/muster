@@ -38,4 +38,23 @@
             @endif
         </aside>
     </section>
+
+    <section class="panel" data-testid="monitor-check-in-history">
+        <p class="eyebrow">Recent activity</p>
+        <h2>Check-in history</h2>
+
+        @if($monitor->checkIns->isEmpty())
+            <p>No check-ins received yet.</p>
+        @else
+            <ol data-testid="monitor-check-in-events">
+                @foreach($monitor->checkIns as $event)
+                    <li>
+                        <time datetime="{{ $event->checked_in_at->toISOString() }}">
+                            {{ $event->checked_in_at->toDayDateTimeString() }}
+                        </time>
+                    </li>
+                @endforeach
+            </ol>
+        @endif
+    </section>
 @endsection
