@@ -43,6 +43,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 final class Monitor extends Model
 {
     /** @var list<string> */
+    private const array FAILURE_EVENT_TYPES = [
+        CheckInEvent::TYPE_MISSED,
+        CheckInEvent::TYPE_NON_ZERO_EXIT,
+    ];
+
+    /** @var list<string> */
     protected $fillable = [
         'name',
         'schedule_key',
@@ -95,6 +101,16 @@ final class Monitor extends Model
         return $this->hasMany(ScheduleExecution::class);
     }
 
+    public function hasActiveFailureIncident(): bool
+    {
+        $latestIncidentEvent = $this->events()
+            ->whereIn('event_type', [...self::FAILURE_EVENT_TYPES, CheckInEvent::TYPE_RECOVERED])
+            ->latest('id')
+            ->value('event_type');
+
+        return in_array($latestIncidentEvent, self::FAILURE_EVENT_TYPES, true);
+    }
+
     /**
      * @param  list<string>  $eventTypes
      * @param  array<string, mixed>  $attributes
@@ -106,6 +122,9 @@ final class Monitor extends Model
         bool $deliverAlerts = true,
     ): void {
         foreach ($eventTypes as $eventType) {
+            $deliveryChannels = $deliverAlerts
+                ? $this->deliveryChannelsFor($eventType)
+                : [];
             $event = $this->events()->create([
                 ...$attributes,
                 'event_type' => $eventType,
@@ -115,8 +134,8 @@ final class Monitor extends Model
                 'next_due_at' => $this->next_due_at,
             ]);
 
-            if ($deliverAlerts && AlertMode::forEventType($eventType) !== null) {
-                $this->createAlertDeliveries($event);
+            if ($deliveryChannels !== []) {
+                $this->createAlertDeliveries($event, $deliveryChannels);
             }
         }
 
@@ -135,24 +154,93 @@ final class Monitor extends Model
             ->delete();
     }
 
-    private function createAlertDeliveries(CheckInEvent $event): void
+    /** @return list<string> */
+    private function deliveryChannelsFor(string $eventType): array
     {
-        $mode = AlertMode::forEventType($event->event_type);
+        $mode = AlertMode::forEventType($eventType);
 
         if ($mode === null) {
-            return;
+            return [];
         }
 
+        if ($eventType === CheckInEvent::TYPE_RECOVERED) {
+            if (! $this->hasActiveFailureIncident()) {
+                return [];
+            }
+
+            return array_values(array_intersect(
+                $this->subscribedChannels(),
+                $this->activeFailureIncidentDeliveryChannels(),
+            ));
+        }
+
+        $channels = $this->subscribedChannels($mode);
+
+        if (in_array($eventType, self::FAILURE_EVENT_TYPES, true)) {
+            $channels = array_diff($channels, $this->activeFailureIncidentDeliveryChannels());
+        }
+
+        return array_values($channels);
+    }
+
+    /** @return list<string> */
+    private function activeFailureIncidentDeliveryChannels(): array
+    {
+        if (! $this->hasActiveFailureIncident()) {
+            return [];
+        }
+
+        $lastRecoveryId = (int) ($this->events()
+            ->where('event_type', CheckInEvent::TYPE_RECOVERED)
+            ->max('id') ?? 0);
+
+        /** @var list<string> $channels */
+        $channels = AlertDelivery::query()
+            ->whereHas('event', fn ($query) => $query
+                ->where('monitor_id', $this->id)
+                ->whereIn('event_type', self::FAILURE_EVENT_TYPES)
+                ->where('id', '>', $lastRecoveryId))
+            ->distinct()
+            ->orderBy('channel')
+            ->pluck('channel')
+            ->all();
+
+        return $channels;
+    }
+
+    /** @return list<string> */
+    private function subscribedChannels(?AlertMode $mode = null): array
+    {
         $destinations = [
-            AlertDelivery::CHANNEL_EMAIL => $this->email_alert_modes->contains($mode)
+            AlertDelivery::CHANNEL_EMAIL => ($mode === null
+                ? $this->email_alert_modes->value !== 0
+                : $this->email_alert_modes->contains($mode))
                 ? $this->email_alert_destination
                 : null,
-            AlertDelivery::CHANNEL_WEBHOOK => $this->webhook_alert_modes->contains($mode)
+            AlertDelivery::CHANNEL_WEBHOOK => ($mode === null
+                ? $this->webhook_alert_modes->value !== 0
+                : $this->webhook_alert_modes->contains($mode))
                 ? $this->webhook_alert_destination
                 : null,
         ];
 
-        foreach ($destinations as $channel => $destination) {
+        return array_keys(array_filter(
+            $destinations,
+            static fn (?string $destination): bool => $destination !== null,
+        ));
+    }
+
+    /** @param list<string> $channels */
+    private function createAlertDeliveries(CheckInEvent $event, array $channels): void
+    {
+        $destinations = [
+            AlertDelivery::CHANNEL_EMAIL => $this->email_alert_destination,
+            AlertDelivery::CHANNEL_WEBHOOK => $this->webhook_alert_destination,
+        ];
+
+        foreach ($channels as $channel) {
+            $destination = $destinations[$channel] ?? null;
+
             if ($destination === null) {
                 continue;
             }

@@ -212,7 +212,7 @@ it('creates deliveries only for channels enabled when the transition occurs', fu
     Queue::assertPushed(DeliverTransitionAlert::class, 1);
 });
 
-it('selects each event kind from every channel mask combination', function (
+it('selects the first matching failure from every channel mask combination', function (
     string $channel,
     int $mask,
     array $expectedEventTypes,
@@ -243,11 +243,11 @@ it('selects each event kind from every channel mask combination', function (
     'email neither' => [AlertDelivery::CHANNEL_EMAIL, 0, []],
     'email missed only' => [AlertDelivery::CHANNEL_EMAIL, AlertMode::Missed->value, [CheckInEvent::TYPE_MISSED]],
     'email non-zero only' => [AlertDelivery::CHANNEL_EMAIL, AlertMode::NonZeroExit->value, [CheckInEvent::TYPE_NON_ZERO_EXIT]],
-    'email both' => [AlertDelivery::CHANNEL_EMAIL, 3, [CheckInEvent::TYPE_MISSED, CheckInEvent::TYPE_NON_ZERO_EXIT]],
+    'email both' => [AlertDelivery::CHANNEL_EMAIL, 3, [CheckInEvent::TYPE_MISSED]],
     'webhook neither' => [AlertDelivery::CHANNEL_WEBHOOK, 0, []],
     'webhook missed only' => [AlertDelivery::CHANNEL_WEBHOOK, AlertMode::Missed->value, [CheckInEvent::TYPE_MISSED]],
     'webhook non-zero only' => [AlertDelivery::CHANNEL_WEBHOOK, AlertMode::NonZeroExit->value, [CheckInEvent::TYPE_NON_ZERO_EXIT]],
-    'webhook both' => [AlertDelivery::CHANNEL_WEBHOOK, 3, [CheckInEvent::TYPE_MISSED, CheckInEvent::TYPE_NON_ZERO_EXIT]],
+    'webhook both' => [AlertDelivery::CHANNEL_WEBHOOK, 3, [CheckInEvent::TYPE_MISSED]],
 ]);
 
 it('sends generated transition identity and timing through email and webhook handlers', function (): void {

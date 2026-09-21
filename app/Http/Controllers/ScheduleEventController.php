@@ -124,8 +124,7 @@ final class ScheduleEventController extends Controller
             $payload['timezone'],
             $acceptedAt,
         );
-        $wasMissed = $monitor->status === 'missed';
-        $wasFailed = $monitor->status === 'failed';
+        $hasActiveFailureIncident = $monitor->hasActiveFailureIncident();
 
         $monitor->executions()->create([
             'execution_id' => $payload['execution_id'],
@@ -136,20 +135,17 @@ final class ScheduleEventController extends Controller
         ]);
         $monitor->forceFill([
             ...$this->scheduleData($payload),
-            'status' => $wasFailed ? 'failed' : 'running',
+            'status' => $hasActiveFailureIncident ? 'failed' : 'running',
             'last_check_in_at' => $acceptedAt,
             'next_due_at' => $nextDueAt,
             'cadence_seconds' => $cadenceSeconds,
-            ...($wasFailed ? [] : [
+            ...($hasActiveFailureIncident ? [] : [
                 'last_exit_code' => null,
                 'last_runtime' => null,
             ]),
         ])->save();
 
-        $eventTypes = $wasMissed
-            ? [CheckInEvent::TYPE_RECOVERED, CheckInEvent::TYPE_STARTED]
-            : [CheckInEvent::TYPE_STARTED];
-        $monitor->recordActivity($eventTypes, $acceptedAt, $this->eventData($payload));
+        $monitor->recordActivity([CheckInEvent::TYPE_STARTED], $acceptedAt, $this->eventData($payload));
 
         return $monitor;
     }
@@ -183,8 +179,7 @@ final class ScheduleEventController extends Controller
         $eventType = $payload['phase'] === 'finished' && $payload['exit_code'] === 0
             ? CheckInEvent::TYPE_FINISHED
             : CheckInEvent::TYPE_NON_ZERO_EXIT;
-        $deliverAlert = $eventType !== CheckInEvent::TYPE_NON_ZERO_EXIT
-            || ! in_array($monitor->status, ['failed', 'missed'], true);
+        $hasActiveFailureIncident = $monitor->hasActiveFailureIncident();
         $executionStatus = $eventType === CheckInEvent::TYPE_FINISHED
             ? ScheduleExecution::STATUS_FINISHED
             : ScheduleExecution::STATUS_FAILED;
@@ -216,11 +211,18 @@ final class ScheduleEventController extends Controller
         ];
 
         $monitor->forceFill($updates)->save();
+        $eventTypes = [$eventType];
+
+        if ($eventType === CheckInEvent::TYPE_FINISHED
+            && $isLatestCompletion
+            && $hasActiveFailureIncident) {
+            $eventTypes[] = CheckInEvent::TYPE_RECOVERED;
+        }
+
         $monitor->recordActivity(
-            [$eventType],
+            $eventTypes,
             $acceptedAt,
             $this->eventData($payload),
-            $deliverAlert,
         );
         $this->pruneCompletedExecutions($monitor);
 
@@ -244,9 +246,11 @@ final class ScheduleEventController extends Controller
         ];
 
         if ($monitor->status === 'late') {
-            $updates['status'] = $monitor->executions()
-                ->where('status', ScheduleExecution::STATUS_RUNNING)
-                ->exists() ? 'running' : 'healthy';
+            $updates['status'] = $monitor->hasActiveFailureIncident()
+                ? 'failed'
+                : ($monitor->executions()
+                    ->where('status', ScheduleExecution::STATUS_RUNNING)
+                    ->exists() ? 'running' : 'healthy');
         }
 
         $monitor->forceFill($updates)->save();
