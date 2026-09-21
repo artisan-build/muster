@@ -20,7 +20,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
-use Illuminate\Validation\Validator as ValidationValidator;
 
 final class ScheduleEventController extends Controller
 {
@@ -180,7 +179,7 @@ final class ScheduleEventController extends Controller
             'output' => ['prohibited'],
         ]);
 
-        $validator->after(function (ValidationValidator $validator) use ($request, $allowedFields): void {
+        $validator->after(function (\Illuminate\Contracts\Validation\Validator $validator) use ($request, $allowedFields): void {
             if ($request->exists('output')) {
                 $validator->errors()->add('output', 'The output field is prohibited.');
             }
