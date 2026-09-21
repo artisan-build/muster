@@ -18,6 +18,7 @@ return new class extends Migration
         });
 
         Schema::table('check_in_events', function (Blueprint $table): void {
+            $table->string('monitor_name')->nullable();
             $table->timestamp('last_check_in_at')->nullable();
             $table->timestamp('next_due_at')->nullable();
         });
@@ -26,7 +27,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('check_in_events', function (Blueprint $table): void {
-            $table->dropColumn(['last_check_in_at', 'next_due_at']);
+            $table->dropColumn(['monitor_name', 'last_check_in_at', 'next_due_at']);
         });
 
         Schema::table('monitors', function (Blueprint $table): void {

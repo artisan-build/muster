@@ -30,9 +30,14 @@ final class AlertDelivery extends Model
 
     public const string STATUS_PENDING = 'pending';
 
+    public const string STATUS_RETRYING = 'retrying';
+
     public const string STATUS_FAILED = 'failed';
 
     public const string STATUS_DELIVERED = 'delivered';
+
+    /** @var list<string> */
+    public const array NONTERMINAL_STATUSES = [self::STATUS_PENDING, self::STATUS_RETRYING];
 
     /** @var list<string> */
     protected $fillable = [
@@ -55,7 +60,10 @@ final class AlertDelivery extends Model
     public function payload(): array
     {
         $event = $this->event;
-        $monitor = $event->monitor;
+
+        if ($event->monitor_name === null) {
+            throw new \LogicException('Transition event monitor identity is missing.');
+        }
 
         return [
             'event' => [
@@ -64,8 +72,8 @@ final class AlertDelivery extends Model
                 'occurred_at' => $event->occurred_at->toISOString(),
             ],
             'monitor' => [
-                'id' => $monitor->id,
-                'name' => $monitor->name,
+                'id' => $event->monitor_id,
+                'name' => $event->monitor_name,
                 'last_check_in_at' => $event->last_check_in_at?->toISOString(),
                 'next_due_at' => $event->next_due_at?->toISOString(),
             ],

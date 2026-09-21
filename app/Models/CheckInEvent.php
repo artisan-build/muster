@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int $monitor_id
  * @property string $event_type
  * @property CarbonImmutable $occurred_at
+ * @property string|null $monitor_name
  * @property CarbonImmutable|null $last_check_in_at
  * @property CarbonImmutable|null $next_due_at
  *
@@ -35,6 +36,7 @@ final class CheckInEvent extends Model
     protected $fillable = [
         'event_type',
         'occurred_at',
+        'monitor_name',
         'last_check_in_at',
         'next_due_at',
     ];

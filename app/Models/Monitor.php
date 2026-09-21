@@ -74,6 +74,7 @@ final class Monitor extends Model
             $event = $this->events()->create([
                 'event_type' => $eventType,
                 'occurred_at' => $occurredAt,
+                'monitor_name' => $this->name,
                 'last_check_in_at' => $this->last_check_in_at,
                 'next_due_at' => $this->next_due_at,
             ]);
@@ -93,6 +94,8 @@ final class Monitor extends Model
         CheckInEvent::query()
             ->where('monitor_id', $this->id)
             ->whereNotIn('id', $retainedEvents->modelKeys())
+            ->whereDoesntHave('alertDeliveries', fn ($query) => $query
+                ->whereIn('status', AlertDelivery::NONTERMINAL_STATUSES))
             ->delete();
     }
 
