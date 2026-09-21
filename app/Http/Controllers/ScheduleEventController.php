@@ -125,6 +125,7 @@ final class ScheduleEventController extends Controller
             $acceptedAt,
         );
         $wasMissed = $monitor->status === 'missed';
+        $wasFailed = $monitor->status === 'failed';
 
         $monitor->executions()->create([
             'execution_id' => $payload['execution_id'],
@@ -135,12 +136,14 @@ final class ScheduleEventController extends Controller
         ]);
         $monitor->forceFill([
             ...$this->scheduleData($payload),
-            'status' => 'running',
+            'status' => $wasFailed ? 'failed' : 'running',
             'last_check_in_at' => $acceptedAt,
             'next_due_at' => $nextDueAt,
             'cadence_seconds' => $cadenceSeconds,
-            'last_exit_code' => null,
-            'last_runtime' => null,
+            ...($wasFailed ? [] : [
+                'last_exit_code' => null,
+                'last_runtime' => null,
+            ]),
         ])->save();
 
         $eventTypes = $wasMissed
@@ -193,13 +196,21 @@ final class ScheduleEventController extends Controller
         $hasOpenExecution = $monitor->executions()
             ->where('status', ScheduleExecution::STATUS_RUNNING)
             ->exists();
+        $latestCompletedExecution = $monitor->executions()
+            ->whereNotNull('completed_at')
+            ->latest('started_at')
+            ->orderByDesc('id')
+            ->firstOrFail();
+        $isLatestCompletion = $latestCompletedExecution->is($execution);
         $updates = [
-            'status' => $eventType === CheckInEvent::TYPE_FINISHED
-                ? ($hasOpenExecution ? 'running' : 'healthy')
-                : 'failed',
+            'status' => $latestCompletedExecution->status === ScheduleExecution::STATUS_FAILED
+                ? 'failed'
+                : ($hasOpenExecution ? 'running' : 'healthy'),
             'last_check_in_at' => $acceptedAt,
-            'last_exit_code' => $payload['exit_code'],
-            'last_runtime' => $payload['runtime'],
+            ...($isLatestCompletion ? [
+                'last_exit_code' => $payload['exit_code'],
+                'last_runtime' => $payload['runtime'],
+            ] : []),
         ];
 
         $monitor->forceFill($updates)->save();

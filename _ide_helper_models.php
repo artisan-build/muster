@@ -137,9 +137,9 @@ namespace App\Models{
  * @property int|null $last_exit_code
  * @property float|null $last_runtime
  * @property bool $background
- * @property bool $email_alerts_enabled
+ * @property \App\ValueObjects\AlertModes $email_alert_modes
  * @property string|null $email_alert_destination
- * @property bool $webhook_alerts_enabled
+ * @property \App\ValueObjects\AlertModes $webhook_alert_modes
  * @property string|null $webhook_alert_destination
  * @property \Carbon\CarbonImmutable|null $created_at
  * @property \Carbon\CarbonImmutable|null $updated_at
@@ -158,7 +158,7 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereCredentialPartitionId($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereDisplay($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereEmailAlertDestination($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereEmailAlertsEnabled($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereEmailAlertModes($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereExpression($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereGraceSeconds($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereId($value)
@@ -172,7 +172,7 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereStatus($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereUpdatedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereWebhookAlertDestination($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereWebhookAlertsEnabled($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereWebhookAlertModes($value)
  * @mixin \Eloquent
  */
 	#[\AllowDynamicProperties]

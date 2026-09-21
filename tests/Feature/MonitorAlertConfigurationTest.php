@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\AlertMode;
 use App\Models\Monitor;
 use ArtisanBuild\BuiltForCloud\StandaloneAccess;
 use ArtisanBuild\BuiltForCloud\User;
@@ -43,35 +44,90 @@ it('shows independent email and webhook controls only to authenticated operators
         ->assertOk()
         ->assertSee('data-testid="monitor-email-alert-configuration"', false)
         ->assertSee('data-testid="monitor-webhook-alert-configuration"', false)
-        ->assertSee('name="email_alerts_enabled"', false)
-        ->assertSee('name="webhook_alerts_enabled"', false);
+        ->assertSee('data-testid="monitor-email-alert-mode-missed"', false)
+        ->assertSee('data-testid="monitor-email-alert-mode-non-zero-exit"', false)
+        ->assertSee('data-testid="monitor-webhook-alert-mode-missed"', false)
+        ->assertSee('data-testid="monitor-webhook-alert-mode-non-zero-exit"', false)
+        ->assertSee('name="email_alert_modes[]"', false)
+        ->assertSee('name="webhook_alert_modes[]"', false);
 });
 
-it('stores independently enabled alert destinations encrypted at rest', function (): void {
+it('stores every alert mode combination independently per channel', function (
+    string $channel,
+    array $selectedModes,
+    int $expectedMask,
+): void {
     signInForAlertConfiguration();
     $monitor = createAlertConfigurationMonitor();
     $email = 'billing-alerts-'.bin2hex(random_bytes(3)).'@example.test';
     $webhook = 'https://hooks.example.test/muster/'.bin2hex(random_bytes(8)).'?token='.bin2hex(random_bytes(8));
+    $modeField = "{$channel}_alert_modes";
+    $destinationField = "{$channel}_alert_destination";
 
     $this->put(route('monitors.update', $monitor), [
         'name' => $monitor->name,
         'cadence_seconds' => $monitor->cadence_seconds,
         'grace_seconds' => $monitor->grace_seconds,
-        'email_alerts_enabled' => '0',
-        'email_alert_destination' => $email,
-        'webhook_alerts_enabled' => '1',
-        'webhook_alert_destination' => $webhook,
+        $modeField => $selectedModes,
+        $destinationField => $channel === 'email' ? $email : $webhook,
     ])->assertRedirect(route('monitors.show', $monitor));
 
     $monitor->refresh();
     $stored = DB::table('monitors')->where('id', $monitor->id)->first();
+    $modes = $channel === 'email' ? $monitor->email_alert_modes : $monitor->webhook_alert_modes;
+    $destination = $channel === 'email' ? $monitor->email_alert_destination : $monitor->webhook_alert_destination;
+    $storedDestination = $stored?->{$destinationField};
 
-    expect($monitor->email_alerts_enabled)->toBeFalse()
-        ->and($monitor->email_alert_destination)->toBe($email)
-        ->and($monitor->webhook_alerts_enabled)->toBeTrue()
-        ->and($monitor->webhook_alert_destination)->toBe($webhook)
-        ->and($stored?->email_alert_destination)->not->toBe($email)
-        ->and($stored?->webhook_alert_destination)->not->toBe($webhook);
+    expect($modes->value)->toBe($expectedMask)
+        ->and($destination)->toBe($channel === 'email' ? $email : $webhook)
+        ->and($stored?->{$modeField})->toBe($expectedMask)
+        ->and($storedDestination)->not->toBe($destination);
+})->with([
+    'email neither' => ['email', [], 0],
+    'email missed' => ['email', [(string) AlertMode::Missed->value], AlertMode::Missed->value],
+    'email non-zero' => ['email', [(string) AlertMode::NonZeroExit->value], AlertMode::NonZeroExit->value],
+    'email both' => ['email', [(string) AlertMode::Missed->value, (string) AlertMode::NonZeroExit->value], 3],
+    'webhook neither' => ['webhook', [], 0],
+    'webhook missed' => ['webhook', [(string) AlertMode::Missed->value], AlertMode::Missed->value],
+    'webhook non-zero' => ['webhook', [(string) AlertMode::NonZeroExit->value], AlertMode::NonZeroExit->value],
+    'webhook both' => ['webhook', [(string) AlertMode::Missed->value, (string) AlertMode::NonZeroExit->value], 3],
+]);
+
+it('does not validate destination formats for unsubscribed channels', function (): void {
+    signInForAlertConfiguration();
+    $monitor = createAlertConfigurationMonitor();
+
+    $this->put(route('monitors.update', $monitor), [
+        'name' => $monitor->name,
+        'cadence_seconds' => $monitor->cadence_seconds,
+        'grace_seconds' => $monitor->grace_seconds,
+        'email_alert_modes' => [],
+        'email_alert_destination' => 'test-created-not-an-email',
+        'webhook_alert_modes' => [],
+        'webhook_alert_destination' => 'test-created-not-a-url',
+    ])->assertRedirect(route('monitors.show', $monitor));
+
+    expect($monitor->refresh()->email_alert_modes->value)->toBe(0)
+        ->and($monitor->webhook_alert_modes->value)->toBe(0)
+        ->and($monitor->email_alert_destination)->toBe('test-created-not-an-email')
+        ->and($monitor->webhook_alert_destination)->toBe('test-created-not-a-url');
+});
+
+it('renders persisted mode selections through structural hooks', function (): void {
+    signInForAlertConfiguration();
+    $monitor = createAlertConfigurationMonitor();
+    $monitor->update([
+        'email_alert_modes' => AlertMode::Missed->value,
+        'webhook_alert_modes' => AlertMode::NonZeroExit->value,
+    ]);
+
+    $content = $this->get(route('monitors.edit', $monitor))->assertOk()->getContent();
+
+    expect($content)
+        ->toMatch('/data-testid="monitor-email-alert-mode-missed"[^>]*>\s*<input[^>]*checked/s')
+        ->toMatch('/data-testid="monitor-webhook-alert-mode-non-zero-exit"[^>]*>\s*<input[^>]*checked/s')
+        ->not->toMatch('/data-testid="monitor-email-alert-mode-non-zero-exit"[^>]*>\s*<input[^>]*checked/s')
+        ->not->toMatch('/data-testid="monitor-webhook-alert-mode-missed"[^>]*>\s*<input[^>]*checked/s');
 });
 
 it('rejects malformed destinations without replacing valid configuration or echoing them in errors', function (): void {
@@ -81,9 +137,9 @@ it('rejects malformed destinations without replacing valid configuration or echo
     $validWebhook = 'https://hooks.example.test/valid/'.bin2hex(random_bytes(8));
 
     $monitor->update([
-        'email_alerts_enabled' => true,
+        'email_alert_modes' => AlertMode::Missed->value,
         'email_alert_destination' => $validEmail,
-        'webhook_alerts_enabled' => true,
+        'webhook_alert_modes' => AlertMode::NonZeroExit->value,
         'webhook_alert_destination' => $validWebhook,
     ]);
 
@@ -93,9 +149,9 @@ it('rejects malformed destinations without replacing valid configuration or echo
         'name' => 'Test Created Mutated Name',
         'cadence_seconds' => 900,
         'grace_seconds' => 90,
-        'email_alerts_enabled' => '1',
+        'email_alert_modes' => [(string) AlertMode::Missed->value, (string) AlertMode::NonZeroExit->value],
         'email_alert_destination' => $invalidEmail,
-        'webhook_alerts_enabled' => '1',
+        'webhook_alert_modes' => [(string) AlertMode::Missed->value],
         'webhook_alert_destination' => $invalidWebhook,
     ]);
 
@@ -118,6 +174,8 @@ it('rejects malformed destinations without replacing valid configuration or echo
         ->not->toContain('secret-fragment')
         ->and($monitor->name)->toBe('Test Created Alert Configuration Monitor')
         ->and($monitor->cadence_seconds)->toBe(300)
+        ->and($monitor->email_alert_modes->value)->toBe(AlertMode::Missed->value)
+        ->and($monitor->webhook_alert_modes->value)->toBe(AlertMode::NonZeroExit->value)
         ->and($monitor->email_alert_destination)->toBe($validEmail)
         ->and($monitor->webhook_alert_destination)->toBe($validWebhook);
 });

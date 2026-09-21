@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Casts\AlertModesCast;
+use App\Enums\AlertMode;
 use App\Jobs\DeliverTransitionAlert;
+use App\ValueObjects\AlertModes;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Collection;
@@ -30,9 +33,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int|null $last_exit_code
  * @property float|null $last_runtime
  * @property bool $background
- * @property bool $email_alerts_enabled
+ * @property AlertModes $email_alert_modes
  * @property string|null $email_alert_destination
- * @property bool $webhook_alerts_enabled
+ * @property AlertModes $webhook_alert_modes
  * @property string|null $webhook_alert_destination
  *
  * @mixin IdeHelperMonitor
@@ -50,9 +53,9 @@ final class Monitor extends Model
         'cadence_seconds',
         'grace_seconds',
         'background',
-        'email_alerts_enabled',
+        'email_alert_modes',
         'email_alert_destination',
-        'webhook_alerts_enabled',
+        'webhook_alert_modes',
         'webhook_alert_destination',
     ];
 
@@ -108,7 +111,7 @@ final class Monitor extends Model
                 'next_due_at' => $this->next_due_at,
             ]);
 
-            if (in_array($eventType, [CheckInEvent::TYPE_MISSED, CheckInEvent::TYPE_RECOVERED], true)) {
+            if (AlertMode::forEventType($eventType) !== null) {
                 $this->createAlertDeliveries($event);
             }
         }
@@ -130,9 +133,19 @@ final class Monitor extends Model
 
     private function createAlertDeliveries(CheckInEvent $event): void
     {
+        $mode = AlertMode::forEventType($event->event_type);
+
+        if ($mode === null) {
+            return;
+        }
+
         $destinations = [
-            AlertDelivery::CHANNEL_EMAIL => $this->email_alerts_enabled ? $this->email_alert_destination : null,
-            AlertDelivery::CHANNEL_WEBHOOK => $this->webhook_alerts_enabled ? $this->webhook_alert_destination : null,
+            AlertDelivery::CHANNEL_EMAIL => $this->email_alert_modes->contains($mode)
+                ? $this->email_alert_destination
+                : null,
+            AlertDelivery::CHANNEL_WEBHOOK => $this->webhook_alert_modes->contains($mode)
+                ? $this->webhook_alert_destination
+                : null,
         ];
 
         foreach ($destinations as $channel => $destination) {
@@ -161,9 +174,9 @@ final class Monitor extends Model
             'last_exit_code' => 'integer',
             'last_runtime' => 'float',
             'background' => 'boolean',
-            'email_alerts_enabled' => 'boolean',
+            'email_alert_modes' => AlertModesCast::class,
             'email_alert_destination' => 'encrypted',
-            'webhook_alerts_enabled' => 'boolean',
+            'webhook_alert_modes' => AlertModesCast::class,
             'webhook_alert_destination' => 'encrypted',
             'last_check_in_at' => 'immutable_datetime',
             'next_due_at' => 'immutable_datetime',

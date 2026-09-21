@@ -19,8 +19,8 @@
                 <div><dt>Grace period</dt><dd>{{ number_format($monitor->grace_seconds) }} seconds</dd></div>
                 <div><dt>Last check-in</dt><dd>{{ $monitor->last_check_in_at?->diffForHumans() ?? 'Waiting for first check-in' }}</dd></div>
                 <div><dt>Next due</dt><dd>{{ $monitor->next_due_at?->diffForHumans() ?? 'Starts after first check-in' }}</dd></div>
-                <div><dt>Email alerts</dt><dd>{{ $monitor->email_alerts_enabled ? 'Enabled' : 'Disabled' }}</dd></div>
-                <div><dt>Webhook alerts</dt><dd>{{ $monitor->webhook_alerts_enabled ? 'Enabled' : 'Disabled' }}</dd></div>
+                <div><dt>Email alerts</dt><dd>{{ $monitor->email_alert_modes->summary() }}</dd></div>
+                <div><dt>Webhook alerts</dt><dd>{{ $monitor->webhook_alert_modes->summary() }}</dd></div>
             </dl>
         </article>
 

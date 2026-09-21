@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\AlertMode;
 use App\Jobs\DeliverTransitionAlert;
 use App\Mail\TransitionAlertMail;
 use App\Models\AlertDelivery;
@@ -31,9 +32,9 @@ function createTransitionAlertMonitor(array $state = []): Monitor
         'name' => 'Test Created Transition Alert Monitor '.bin2hex(random_bytes(3)),
         'cadence_seconds' => 300,
         'grace_seconds' => 30,
-        'email_alerts_enabled' => true,
+        'email_alert_modes' => AlertMode::Missed->value | AlertMode::NonZeroExit->value,
         'email_alert_destination' => 'transition-alerts@example.test',
-        'webhook_alerts_enabled' => true,
+        'webhook_alert_modes' => AlertMode::Missed->value | AlertMode::NonZeroExit->value,
         'webhook_alert_destination' => 'https://hooks.example.test/muster/'.bin2hex(random_bytes(8)).'?key='.bin2hex(random_bytes(8)),
     ]);
 
@@ -111,7 +112,7 @@ function releaseTransitionAlertRetry(): void
     DB::table('jobs')->update(['available_at' => now()->subSecond()->timestamp]);
 }
 
-it('creates one logical delivery per enabled channel only for missed and recovered transitions', function (): void {
+it('creates one logical delivery per subscribed channel for missed and recovered transitions', function (): void {
     Queue::fake();
     $monitor = createTransitionAlertMonitor([
         'status' => 'healthy',
@@ -195,7 +196,7 @@ it('enforces delivery uniqueness and serializes only an opaque identifier into t
 it('creates deliveries only for channels enabled when the transition occurs', function (): void {
     Queue::fake();
     $monitor = createTransitionAlertMonitor([
-        'email_alerts_enabled' => false,
+        'email_alert_modes' => 0,
         'status' => 'late',
         'last_check_in_at' => '2026-09-21 12:00:00',
         'next_due_at' => '2026-09-21 12:05:00',
@@ -210,6 +211,44 @@ it('creates deliveries only for channels enabled when the transition occurs', fu
 
     Queue::assertPushed(DeliverTransitionAlert::class, 1);
 });
+
+it('selects each event kind from every channel mask combination', function (
+    string $channel,
+    int $mask,
+    array $expectedEventTypes,
+): void {
+    Queue::fake();
+    $monitor = createTransitionAlertMonitor([
+        'email_alert_modes' => $channel === AlertDelivery::CHANNEL_EMAIL ? $mask : 0,
+        'webhook_alert_modes' => $channel === AlertDelivery::CHANNEL_WEBHOOK ? $mask : 0,
+    ]);
+
+    $monitor->recordActivity([
+        CheckInEvent::TYPE_MISSED,
+        CheckInEvent::TYPE_NON_ZERO_EXIT,
+    ], now());
+
+    $deliveries = AlertDelivery::query()
+        ->with('event')
+        ->orderBy('id')
+        ->get();
+
+    expect($deliveries->pluck('channel')->unique()->values()->all())
+        ->toBe($expectedEventTypes === [] ? [] : [$channel])
+        ->and($deliveries->map(fn (AlertDelivery $delivery): string => $delivery->event->event_type)->all())
+        ->toBe($expectedEventTypes);
+
+    Queue::assertPushed(DeliverTransitionAlert::class, count($expectedEventTypes));
+})->with([
+    'email neither' => [AlertDelivery::CHANNEL_EMAIL, 0, []],
+    'email missed only' => [AlertDelivery::CHANNEL_EMAIL, AlertMode::Missed->value, [CheckInEvent::TYPE_MISSED]],
+    'email non-zero only' => [AlertDelivery::CHANNEL_EMAIL, AlertMode::NonZeroExit->value, [CheckInEvent::TYPE_NON_ZERO_EXIT]],
+    'email both' => [AlertDelivery::CHANNEL_EMAIL, 3, [CheckInEvent::TYPE_MISSED, CheckInEvent::TYPE_NON_ZERO_EXIT]],
+    'webhook neither' => [AlertDelivery::CHANNEL_WEBHOOK, 0, []],
+    'webhook missed only' => [AlertDelivery::CHANNEL_WEBHOOK, AlertMode::Missed->value, [CheckInEvent::TYPE_MISSED]],
+    'webhook non-zero only' => [AlertDelivery::CHANNEL_WEBHOOK, AlertMode::NonZeroExit->value, [CheckInEvent::TYPE_NON_ZERO_EXIT]],
+    'webhook both' => [AlertDelivery::CHANNEL_WEBHOOK, 3, [CheckInEvent::TYPE_MISSED, CheckInEvent::TYPE_NON_ZERO_EXIT]],
+]);
 
 it('sends generated transition identity and timing through email and webhook handlers', function (): void {
     config(['mail.default' => 'smtp']);
@@ -447,7 +486,7 @@ it('retains a pending delivery event beyond the newest one hundred events until 
     Queue::fake();
     Http::fake(['*' => Http::response(status: 204)]);
     $monitor = createTransitionAlertMonitor([
-        'email_alerts_enabled' => false,
+        'email_alert_modes' => 0,
         'status' => 'missed',
     ]);
     $occurredAt = now();
