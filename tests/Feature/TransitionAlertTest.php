@@ -321,6 +321,64 @@ it('rejects non-delivery mailers and unsafe composites', function (string $maile
     ]],
 ]);
 
+it('rejects an allowlisted mailer whose URL selects the logging transport before receiving the destination', function (): void {
+    config([
+        'mail.default' => 'url-overridden-mailer',
+        'mail.mailers.url-overridden-mailer' => [
+            'transport' => 'smtp',
+            'url' => 'log://default',
+        ],
+    ]);
+    $handler = new TestHandler;
+    app()->instance(LoggerInterface::class, new Logger('transition-alert-url-test', [$handler]));
+    $delivery = createAlertDelivery(AlertDelivery::CHANNEL_EMAIL);
+    $destination = $delivery->destination;
+
+    try {
+        (new DeliverTransitionAlert($delivery->id))->handle();
+        $this->fail('Expected the URL-selected logging transport to be rejected.');
+    } catch (RuntimeException $exception) {
+        expect($exception->getMessage())->toBe('Transition alert delivery failed.')
+            ->not->toContain($destination)
+            ->and($exception->getPrevious())->toBeNull();
+    }
+
+    expect(json_encode($handler->getRecords(), JSON_THROW_ON_ERROR))->not->toContain($destination)
+        ->and($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_RETRYING)
+        ->and($delivery->delivered_at)->toBeNull();
+});
+
+it('rejects a nested allowlisted mailer whose URL selects the logging transport before receiving the destination', function (): void {
+    config([
+        'mail.default' => 'url-overridden-failover',
+        'mail.mailers.url-overridden-failover' => [
+            'transport' => 'failover',
+            'mailers' => ['url-overridden-member', 'smtp'],
+        ],
+        'mail.mailers.url-overridden-member' => [
+            'transport' => 'smtp',
+            'url' => 'log://default',
+        ],
+    ]);
+    $handler = new TestHandler;
+    app()->instance(LoggerInterface::class, new Logger('transition-alert-nested-url-test', [$handler]));
+    $delivery = createAlertDelivery(AlertDelivery::CHANNEL_EMAIL);
+    $destination = $delivery->destination;
+
+    try {
+        (new DeliverTransitionAlert($delivery->id))->handle();
+        $this->fail('Expected the nested URL-selected logging transport to be rejected.');
+    } catch (RuntimeException $exception) {
+        expect($exception->getMessage())->toBe('Transition alert delivery failed.')
+            ->not->toContain($destination)
+            ->and($exception->getPrevious())->toBeNull();
+    }
+
+    expect(json_encode($handler->getRecords(), JSON_THROW_ON_ERROR))->not->toContain($destination)
+        ->and($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_RETRYING)
+        ->and($delivery->delivered_at)->toBeNull();
+});
+
 it('keeps a failed attempt retryable and records a later worker success', function (): void {
     config(['queue.default' => 'database']);
     Http::fakeSequence()
