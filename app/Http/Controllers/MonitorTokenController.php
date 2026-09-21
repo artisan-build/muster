@@ -1,0 +1,126 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers;
+
+use App\Models\CheckInEvent;
+use App\Models\Monitor;
+use ArtisanBuild\BuiltForCloud\BoundBearerCredential;
+use ArtisanBuild\BuiltForCloud\BoundBearerCredentialAuthenticator;
+use ArtisanBuild\BuiltForCloud\Exceptions\CredentialAuthorizationRefused;
+use ArtisanBuild\BuiltForCloud\Exceptions\CredentialVerbRefused;
+use ArtisanBuild\BuiltForCloud\Exceptions\InvalidCredentialInput;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+
+final class MonitorTokenController extends Controller
+{
+    public function __construct(
+        private readonly BoundBearerCredentialAuthenticator $authenticator,
+    ) {}
+
+    public function checkIn(Request $request, string $monitorId): JsonResponse
+    {
+        $credential = $this->authenticate($request, 'muster.check-in');
+
+        if ($credential === null) {
+            return $this->unauthorized();
+        }
+
+        $acceptedAt = now();
+        $accepted = DB::transaction(function () use ($credential, $monitorId, $acceptedAt): bool {
+            $monitor = $this->enabledMonitor($credential, $monitorId, true);
+
+            if ($monitor === null) {
+                return false;
+            }
+
+            $monitor->forceFill([
+                'status' => 'healthy',
+                'last_check_in_at' => $acceptedAt,
+                'next_due_at' => $acceptedAt->addSeconds($monitor->cadence_seconds),
+            ])->save();
+
+            $monitor->checkIns()->create(['checked_in_at' => $acceptedAt]);
+
+            $retainedIds = $monitor->checkIns()
+                ->orderByDesc('checked_in_at')
+                ->orderByDesc('id')
+                ->limit(100)
+                ->pluck('id');
+
+            CheckInEvent::query()
+                ->where('monitor_id', $monitor->id)
+                ->whereNotIn('id', $retainedIds)
+                ->delete();
+
+            return true;
+        });
+
+        return $accepted
+            ? response()->json(['status' => 'ok'])
+            : $this->unauthorized();
+    }
+
+    public function history(Request $request, string $monitorId): JsonResponse
+    {
+        $credential = $this->authenticate($request, 'muster.history.read');
+
+        if ($credential === null) {
+            return $this->unauthorized();
+        }
+
+        $monitor = $this->enabledMonitor($credential, $monitorId);
+
+        if ($monitor === null) {
+            return $this->unauthorized();
+        }
+
+        return response()->json([
+            'events' => $monitor->checkIns()
+                ->orderByDesc('checked_in_at')
+                ->orderByDesc('id')
+                ->get()
+                ->map(static fn (CheckInEvent $event): array => [
+                    'checked_in_at' => $event->checked_in_at->toISOString(),
+                ])
+                ->all(),
+        ]);
+    }
+
+    private function authenticate(Request $request, string $appPurpose): ?BoundBearerCredential
+    {
+        try {
+            return $this->authenticator->authenticate($request, $appPurpose);
+        } catch (CredentialAuthorizationRefused|CredentialVerbRefused|InvalidCredentialInput) {
+            return null;
+        }
+    }
+
+    private function enabledMonitor(
+        BoundBearerCredential $credential,
+        string $monitorId,
+        bool $lock = false,
+    ): ?Monitor {
+        $query = Monitor::query()
+            ->select('monitors.*')
+            ->join('credential_partitions as partition', 'partition.id', '=', 'monitors.credential_partition_id')
+            ->where('monitors.id', $monitorId)
+            ->where('monitors.is_enabled', true)
+            ->where('partition.subject_type', $credential->scope->subject->type->value)
+            ->where('partition.subject_ref', $credential->scope->subject->ref);
+
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        return $query->first();
+    }
+
+    private function unauthorized(): JsonResponse
+    {
+        return response()->json(['message' => 'Unauthenticated.'], 401);
+    }
+}

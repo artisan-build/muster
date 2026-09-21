@@ -6,9 +6,12 @@ namespace App\Models;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property int $id
+ * @property int $credential_partition_id
  * @property string $name
  * @property int $cadence_seconds
  * @property int $grace_seconds
@@ -27,6 +30,33 @@ final class Monitor extends Model
         'cadence_seconds',
         'grace_seconds',
     ];
+
+    protected static function booted(): void
+    {
+        self::creating(function (self $monitor): void {
+            if ($monitor->credential_partition_id === null) {
+                $monitor->credential_partition_id = CredentialPartition::local()->id;
+            }
+        });
+
+        self::updating(function (self $monitor): void {
+            if ($monitor->isDirty('credential_partition_id')) {
+                throw new \LogicException('A monitor credential partition cannot be changed.');
+            }
+        });
+    }
+
+    /** @return BelongsTo<CredentialPartition, $this> */
+    public function credentialPartition(): BelongsTo
+    {
+        return $this->belongsTo(CredentialPartition::class);
+    }
+
+    /** @return HasMany<CheckInEvent, $this> */
+    public function checkIns(): HasMany
+    {
+        return $this->hasMany(CheckInEvent::class);
+    }
 
     /** @return array<string, string> */
     protected function casts(): array

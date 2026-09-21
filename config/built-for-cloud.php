@@ -16,6 +16,7 @@ return [
         'session_guard' => null,
         'app_purposes' => [
             'muster.check-in' => 'consumption',
+            'muster.history.read' => 'consumption',
         ],
     ],
     'ui' => [
@@ -27,6 +28,7 @@ return [
         'managed_transitions' => true,
         'credential_purposes' => [
             0 => 'muster.check-in',
+            1 => 'muster.history.read',
         ],
     ],
 ];
