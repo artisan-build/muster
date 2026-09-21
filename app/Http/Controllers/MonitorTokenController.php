@@ -79,6 +79,12 @@ final class MonitorTokenController extends Controller
                 ->map(static fn (CheckInEvent $event): array => [
                     'type' => $event->event_type,
                     'occurred_at' => $event->occurred_at->toISOString(),
+                    'command' => $event->command,
+                    'display' => $event->display,
+                    'expression' => $event->expression,
+                    'exit_code' => $event->exit_code,
+                    'runtime' => $event->runtime,
+                    'background' => $event->background,
                 ])
                 ->all(),
         ]);

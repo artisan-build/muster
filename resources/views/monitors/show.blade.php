@@ -41,6 +41,20 @@
         </aside>
     </section>
 
+    @if($monitor->schedule_key !== null)
+        <section class="panel" data-testid="monitor-schedule-details">
+            <p class="eyebrow">Connected schedule</p>
+            <h2>{{ $monitor->display }}</h2>
+            <dl>
+                <div><dt>Command</dt><dd><code>{{ $monitor->command }}</code></dd></div>
+                <div><dt>Cron expression</dt><dd><code>{{ $monitor->expression }}</code></dd></div>
+                <div><dt>Execution</dt><dd>{{ $monitor->background ? 'Background' : 'Foreground' }}</dd></div>
+                <div><dt>Last exit code</dt><dd>{{ $monitor->last_exit_code ?? 'Not finished yet' }}</dd></div>
+                <div><dt>Last runtime</dt><dd>{{ $monitor->last_runtime === null ? 'Not finished yet' : number_format($monitor->last_runtime, 2).' seconds' }}</dd></div>
+            </dl>
+        </section>
+    @endif
+
     <section class="panel" data-testid="monitor-activity-history">
         <p class="eyebrow">Recent activity</p>
         <h2>Activity history</h2>
@@ -55,6 +69,18 @@
                         <time datetime="{{ $event->occurred_at->toISOString() }}">
                             {{ $event->occurred_at->toDayDateTimeString() }}
                         </time>
+                        @if($event->command !== null)
+                            <dl data-testid="monitor-activity-event-details">
+                                <div><dt>Command</dt><dd><code>{{ $event->command }}</code></dd></div>
+                                <div><dt>Expression</dt><dd><code>{{ $event->expression }}</code></dd></div>
+                                @if($event->exit_code !== null)
+                                    <div><dt>Exit code</dt><dd>{{ $event->exit_code }}</dd></div>
+                                @endif
+                                @if($event->runtime !== null)
+                                    <div><dt>Runtime</dt><dd>{{ number_format($event->runtime, 2) }} seconds</dd></div>
+                                @endif
+                            </dl>
+                        @endif
                     </li>
                 @endforeach
             </ol>

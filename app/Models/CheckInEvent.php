@@ -15,6 +15,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $event_type
  * @property CarbonImmutable $occurred_at
  * @property string|null $monitor_name
+ * @property string|null $command
+ * @property string|null $display
+ * @property string|null $expression
+ * @property int|null $exit_code
+ * @property float|null $runtime
+ * @property bool $background
  * @property CarbonImmutable|null $last_check_in_at
  * @property CarbonImmutable|null $next_due_at
  *
@@ -30,6 +36,14 @@ final class CheckInEvent extends Model
 
     public const string TYPE_RECOVERED = 'recovered';
 
+    public const string TYPE_STARTED = 'started';
+
+    public const string TYPE_FINISHED = 'finished';
+
+    public const string TYPE_SKIPPED = 'skipped';
+
+    public const string TYPE_NON_ZERO_EXIT = 'non_zero_exit';
+
     public $timestamps = false;
 
     /** @var list<string> */
@@ -37,6 +51,12 @@ final class CheckInEvent extends Model
         'event_type',
         'occurred_at',
         'monitor_name',
+        'command',
+        'display',
+        'expression',
+        'exit_code',
+        'runtime',
+        'background',
         'last_check_in_at',
         'next_due_at',
     ];
@@ -60,6 +80,9 @@ final class CheckInEvent extends Model
             'occurred_at' => 'immutable_datetime',
             'last_check_in_at' => 'immutable_datetime',
             'next_due_at' => 'immutable_datetime',
+            'exit_code' => 'integer',
+            'runtime' => 'float',
+            'background' => 'boolean',
         ];
     }
 }
