@@ -16,10 +16,14 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\Request as LaravelRequest;
 use Illuminate\Queue\DatabaseQueue;
+use Illuminate\Queue\TimeoutExceededException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
+use Monolog\Handler\TestHandler;
+use Monolog\Logger;
+use Psr\Log\LoggerInterface;
 
 function createTransitionAlertMonitor(array $state = []): Monitor
 {
@@ -84,6 +88,7 @@ function createAlertDelivery(string $channel): AlertDelivery
     $event = $monitor->events()->create([
         'event_type' => CheckInEvent::TYPE_MISSED,
         'occurred_at' => '2026-09-21 12:05:30',
+        'monitor_name' => $monitor->name,
         'last_check_in_at' => $monitor->last_check_in_at,
         'next_due_at' => $monitor->next_due_at,
     ]);
@@ -94,6 +99,16 @@ function createAlertDelivery(string $channel): AlertDelivery
             ? $monitor->email_alert_destination
             : $monitor->webhook_alert_destination,
     ]);
+}
+
+function runTransitionAlertWorkerOnce(): void
+{
+    test()->artisan('queue:work database --once --tries=3 --no-interaction')->assertSuccessful();
+}
+
+function releaseTransitionAlertRetry(): void
+{
+    DB::table('jobs')->update(['available_at' => now()->subSecond()->timestamp]);
 }
 
 it('creates one logical delivery per enabled channel only for missed and recovered transitions', function (): void {
@@ -197,6 +212,7 @@ it('creates deliveries only for channels enabled when the transition occurs', fu
 });
 
 it('sends generated transition identity and timing through email and webhook handlers', function (): void {
+    config(['mail.default' => 'smtp']);
     Mail::fake();
     Http::fake(['*' => Http::response(status: 204)]);
 
@@ -206,7 +222,7 @@ it('sends generated transition identity and timing through email and webhook han
     (new DeliverTransitionAlert($emailDelivery->id))->handle();
     (new DeliverTransitionAlert($webhookDelivery->id))->handle();
 
-    $emailPayload = $emailDelivery->fresh('event.monitor')->payload();
+    $emailPayload = $emailDelivery->fresh('event')->payload();
     Mail::assertSent(TransitionAlertMail::class, function (TransitionAlertMail $mail) use ($emailPayload): bool {
         expect($mail->envelope()->subject)
             ->toContain($emailPayload['monitor']['name'])
@@ -223,7 +239,7 @@ it('sends generated transition identity and timing through email and webhook han
         return true;
     });
 
-    $webhookPayload = $webhookDelivery->fresh('event.monitor')->payload();
+    $webhookPayload = $webhookDelivery->fresh('event')->payload();
     Http::assertSent(fn (Request $request): bool => $request->url() === $webhookDelivery->destination
         && $request->data() === $webhookPayload);
 
@@ -256,8 +272,206 @@ it('uses bounded retries and sanitizes non-2xx failures without duplicating logi
             ->and($exception->getPrevious())->toBeNull();
     }
 
-    expect($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_FAILED)
+    expect($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_RETRYING)
         ->and($delivery->attempt_count)->toBe(1)
         ->and($delivery->last_error_code)->toBe('transport_failed')
         ->and(AlertDelivery::query()->count())->toBe(1);
+});
+
+it('refuses the default logging mail transport without logging or claiming delivery', function (): void {
+    config(['mail.default' => 'log']);
+    $handler = new TestHandler;
+    app()->instance(LoggerInterface::class, new Logger('transition-alert-test', [$handler]));
+    $delivery = createAlertDelivery(AlertDelivery::CHANNEL_EMAIL);
+    $destination = $delivery->destination;
+
+    try {
+        (new DeliverTransitionAlert($delivery->id))->handle();
+        $this->fail('Expected the non-delivery mail transport to be rejected.');
+    } catch (RuntimeException $exception) {
+        expect($exception->getMessage())->toBe('Transition alert delivery failed.')
+            ->not->toContain($destination)
+            ->and($exception->getPrevious())->toBeNull();
+    }
+
+    expect(json_encode($handler->getRecords(), JSON_THROW_ON_ERROR))->not->toContain($destination)
+        ->and($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_RETRYING)
+        ->and($delivery->delivered_at)->toBeNull();
+});
+
+it('rejects non-delivery mailers and unsafe composites', function (string $mailer, array $configuration): void {
+    config([
+        'mail.default' => $mailer,
+        "mail.mailers.{$mailer}" => $configuration,
+    ]);
+    Mail::fake();
+    $delivery = createAlertDelivery(AlertDelivery::CHANNEL_EMAIL);
+
+    expect(fn () => (new DeliverTransitionAlert($delivery->id))->handle())
+        ->toThrow(RuntimeException::class, 'Transition alert delivery failed.');
+
+    Mail::assertNothingSent();
+    expect($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_RETRYING)
+        ->and($delivery->delivered_at)->toBeNull();
+})->with([
+    'array transport' => ['test-array', ['transport' => 'array']],
+    'failover containing log' => ['test-failover', [
+        'transport' => 'failover',
+        'mailers' => ['smtp', 'log'],
+    ]],
+]);
+
+it('keeps a failed attempt retryable and records a later worker success', function (): void {
+    config(['queue.default' => 'database']);
+    Http::fakeSequence()
+        ->push(['ignored' => true], 500)
+        ->push(status: 204);
+    $delivery = createAlertDelivery(AlertDelivery::CHANNEL_WEBHOOK);
+    Queue::connection('database')->push(new DeliverTransitionAlert($delivery->id));
+
+    runTransitionAlertWorkerOnce();
+
+    expect($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_RETRYING)
+        ->and($delivery->attempt_count)->toBe(1)
+        ->and($delivery->last_error_code)->toBe('transport_failed')
+        ->and(DB::table('jobs')->count())->toBe(1)
+        ->and(DB::table('failed_jobs')->count())->toBe(0);
+
+    releaseTransitionAlertRetry();
+    runTransitionAlertWorkerOnce();
+
+    expect($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_DELIVERED)
+        ->and($delivery->attempt_count)->toBe(2)
+        ->and($delivery->last_error_code)->toBeNull()
+        ->and(DB::table('jobs')->count())->toBe(0)
+        ->and(DB::table('failed_jobs')->count())->toBe(0);
+});
+
+it('marks a delivery terminally failed only after worker exhaustion', function (): void {
+    config(['queue.default' => 'database']);
+    Http::fake(['*' => Http::response(['secret' => 'worker-response-secret'], 500)]);
+    $delivery = createAlertDelivery(AlertDelivery::CHANNEL_WEBHOOK);
+    $destination = $delivery->destination;
+    Queue::connection('database')->push(new DeliverTransitionAlert($delivery->id));
+
+    runTransitionAlertWorkerOnce();
+    releaseTransitionAlertRetry();
+    runTransitionAlertWorkerOnce();
+    releaseTransitionAlertRetry();
+    runTransitionAlertWorkerOnce();
+
+    $failedException = (string) DB::table('failed_jobs')->value('exception');
+
+    expect($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_FAILED)
+        ->and($delivery->attempt_count)->toBe(3)
+        ->and($delivery->last_error_code)->toBe('attempts_exhausted')
+        ->and(DB::table('jobs')->count())->toBe(0)
+        ->and(DB::table('failed_jobs')->count())->toBe(1)
+        ->and($failedException)->toContain('Transition alert delivery failed.')
+        ->not->toContain($destination)
+        ->not->toContain('worker-response-secret');
+});
+
+it('marks a timed out job terminally failed through the failure callback', function (): void {
+    $delivery = createAlertDelivery(AlertDelivery::CHANNEL_WEBHOOK);
+    $job = new DeliverTransitionAlert($delivery->id);
+
+    expect($job->failOnTimeout)->toBeTrue();
+
+    $job->failed(new TimeoutExceededException('Test-created timeout marker.'));
+
+    expect($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_FAILED)
+        ->and($delivery->last_error_code)->toBe('timeout')
+        ->and($delivery->delivered_at)->toBeNull();
+});
+
+it('retains a pending delivery event beyond the newest one hundred events until it is terminal', function (): void {
+    Queue::fake();
+    Http::fake(['*' => Http::response(status: 204)]);
+    $monitor = createTransitionAlertMonitor([
+        'email_alerts_enabled' => false,
+        'status' => 'missed',
+    ]);
+    $occurredAt = now();
+    $monitor->recordActivity([CheckInEvent::TYPE_MISSED], $occurredAt);
+    $delivery = AlertDelivery::query()->sole();
+    $eventId = $delivery->check_in_event_id;
+
+    foreach (range(1, 101) as $offset) {
+        $monitor->recordActivity([CheckInEvent::TYPE_CHECK_IN], $occurredAt->addSeconds($offset));
+    }
+
+    expect(CheckInEvent::query()->find($eventId))->not->toBeNull()
+        ->and(AlertDelivery::query()->find($delivery->id))->not->toBeNull()
+        ->and($monitor->events()->count())->toBe(101);
+
+    (new DeliverTransitionAlert($delivery->id))->handle();
+
+    expect($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_DELIVERED);
+
+    $monitor->recordActivity([CheckInEvent::TYPE_CHECK_IN], $occurredAt->addSeconds(102));
+
+    expect(CheckInEvent::query()->find($eventId))->toBeNull()
+        ->and(AlertDelivery::query()->find($delivery->id))->toBeNull()
+        ->and($monitor->events()->count())->toBe(100);
+});
+
+it('keeps event-time monitor identity and destinations stable across rename reconfiguration and retry', function (): void {
+    config(['mail.default' => 'smtp']);
+    Queue::fake();
+    Mail::fake();
+    Http::fakeSequence()
+        ->push(['ignored' => true], 500)
+        ->push(status: 204);
+    $monitor = createTransitionAlertMonitor([
+        'name' => 'Test Created Original Alert Identity',
+        'status' => 'missed',
+        'last_check_in_at' => '2026-09-21 12:00:00',
+        'next_due_at' => '2026-09-21 12:05:00',
+    ]);
+    $originalName = $monitor->name;
+    $originalEmail = $monitor->email_alert_destination;
+    $originalWebhook = $monitor->webhook_alert_destination;
+    $monitor->recordActivity([CheckInEvent::TYPE_MISSED], now());
+    $deliveries = AlertDelivery::query()->orderBy('channel')->get()->keyBy('channel');
+    $emailDelivery = $deliveries->get(AlertDelivery::CHANNEL_EMAIL);
+    $webhookDelivery = $deliveries->get(AlertDelivery::CHANNEL_WEBHOOK);
+
+    if (! $emailDelivery instanceof AlertDelivery || ! $webhookDelivery instanceof AlertDelivery) {
+        throw new LogicException('Expected both transition alert delivery channels.');
+    }
+
+    $monitor->update([
+        'name' => 'Test Created Renamed Before Delivery',
+        'email_alert_destination' => 'changed-email@example.test',
+        'webhook_alert_destination' => 'https://hooks.example.test/changed?key=changed',
+    ]);
+
+    (new DeliverTransitionAlert($emailDelivery->id))->handle();
+
+    try {
+        (new DeliverTransitionAlert($webhookDelivery->id))->handle();
+        $this->fail('Expected the first webhook attempt to fail.');
+    } catch (RuntimeException) {
+        // The retry must render from the same event snapshot.
+    }
+
+    $monitor->update(['name' => 'Test Created Renamed Before Retry']);
+    (new DeliverTransitionAlert($webhookDelivery->id))->handle();
+
+    $emailPayload = $emailDelivery->fresh('event')->payload();
+    $webhookPayload = $webhookDelivery->fresh('event')->payload();
+
+    expect($emailPayload)->toBe($webhookPayload)
+        ->and($emailPayload['monitor']['name'])->toBe($originalName)
+        ->and($emailDelivery->destination)->toBe($originalEmail)
+        ->and($webhookDelivery->destination)->toBe($originalWebhook)
+        ->and($webhookDelivery->refresh()->attempt_count)->toBe(2)
+        ->and($webhookDelivery->status)->toBe(AlertDelivery::STATUS_DELIVERED);
+
+    Mail::assertSent(TransitionAlertMail::class, fn (TransitionAlertMail $mail): bool => $mail->hasTo($originalEmail)
+        && str_contains($mail->envelope()->subject, $originalName));
+    Http::assertSentCount(2);
+    Http::assertSent(fn (Request $request): bool => $request->url() === $originalWebhook
+        && $request->data() === $webhookPayload);
 });
