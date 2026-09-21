@@ -55,6 +55,8 @@ namespace App\Models{
  * @property string|null $command
  * @property string|null $display
  * @property string|null $expression
+ * @property string|null $execution_id
+ * @property string|null $timezone
  * @property int|null $exit_code
  * @property float|null $runtime
  * @property bool $background
@@ -125,6 +127,7 @@ namespace App\Models{
  * @property string|null $command
  * @property string|null $display
  * @property string|null $expression
+ * @property string|null $timezone
  * @property int $cadence_seconds
  * @property int $grace_seconds
  * @property bool $is_enabled
@@ -143,6 +146,8 @@ namespace App\Models{
  * @property-read \App\Models\CredentialPartition $credentialPartition
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\CheckInEvent> $events
  * @property-read int|null $events_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\ScheduleExecution> $executions
+ * @property-read int|null $executions_count
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor query()
@@ -172,4 +177,26 @@ namespace App\Models{
  */
 	#[\AllowDynamicProperties]
 	final class IdeHelperMonitor {}
+}
+
+namespace App\Models{
+/**
+ * @property int $id
+ * @property int $monitor_id
+ * @property string $execution_id
+ * @property string $status
+ * @property CarbonImmutable $started_at
+ * @property CarbonImmutable|null $completed_at
+ * @property float|null $runtime
+ * @property int|null $exit_code
+ * @property bool $background
+ * @property string $timezone
+ * @property-read \App\Models\Monitor|null $monitor
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution query()
+ * @mixin \Eloquent
+ */
+	#[\AllowDynamicProperties]
+	final class IdeHelperScheduleExecution {}
 }
