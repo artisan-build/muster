@@ -24,7 +24,7 @@ final class MusterCredentialDeclaration implements CredentialDeclaration, Declar
 
     public function authorize(Credential $credential, ?string $ability, Request $request): bool
     {
-        return true;
+        return false;
     }
 
     public function headlineStat(): HeadlineStat

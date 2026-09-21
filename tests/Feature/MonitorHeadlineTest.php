@@ -6,11 +6,37 @@ use App\BuiltForCloud\MonitorHeadlineLabel;
 use App\BuiltForCloud\MusterCredentialDeclaration;
 use App\Models\Monitor;
 use ArtisanBuild\BuiltForCloud\Contracts\CredentialDeclaration;
+use ArtisanBuild\BuiltForCloud\Credential;
+use ArtisanBuild\BuiltForCloud\CredentialKind;
+use ArtisanBuild\BuiltForCloud\CredentialPurpose;
+use ArtisanBuild\BuiltForCloud\CredentialStatus;
+use ArtisanBuild\BuiltForCloud\OperatorAbility;
+use ArtisanBuild\BuiltForCloud\SubjectType;
 use ArtisanBuild\BuiltForCloud\Testing\ContractAssertions;
 use ArtisanBuild\BuiltForCloud\Vitals\CollectVitals;
+use Illuminate\Http\Request;
 use Illuminate\Testing\TestResponse;
 
 uses(ContractAssertions::class);
+
+it('refuses credential authorization until the check-in policy is implemented', function (): void {
+    $credential = new Credential([
+        'kind' => CredentialKind::Bearer,
+        'purpose' => CredentialPurpose::DashboardMetadata,
+        'subject_type' => SubjectType::Operator,
+        'subject_ref' => 'test-created-dashboard-reader',
+        'abilities' => [OperatorAbility::MetadataRead->value],
+        'status' => CredentialStatus::Active,
+    ]);
+    $declaration = resolve(CredentialDeclaration::class);
+
+    expect($declaration)->toBeInstanceOf(MusterCredentialDeclaration::class)
+        ->and($declaration->authorize(
+            $credential,
+            OperatorAbility::MetadataRead->value,
+            Request::create('/bfc/console/vitals'),
+        ))->toBeFalse();
+});
 
 it('reports only enabled monitors through the declared bounded headline', function (): void {
     foreach (['Test Created API Sync', 'Test Created Invoice Sweep'] as $name) {
