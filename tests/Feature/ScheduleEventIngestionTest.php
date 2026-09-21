@@ -717,6 +717,50 @@ it('marks a post-failure hung execution missed exactly once for missed-only subs
     Queue::assertPushed(DeliverTransitionAlert::class, 1);
 });
 
+it('does not page again when a missed execution later completes non-zero', function (): void {
+    Queue::fake();
+    $this->travelTo('2026-09-21 17:30:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan execution:missed-then-failed --test-created';
+    $executionId = '43434343-4343-4343-8343-434343434343';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $executionId,
+    ]))->assertOk();
+    $monitor = Monitor::query()->sole();
+    $monitor->update([
+        'webhook_alert_modes' => AlertMode::Missed->value | AlertMode::NonZeroExit->value,
+        'webhook_alert_destination' => 'https://hooks.example.test/missed-then-failed',
+    ]);
+
+    $this->travelTo('2026-09-21 17:32:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 2 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    expect($monitor->refresh()->status)->toBe('missed')
+        ->and(AlertDelivery::query()->count())->toBe(1)
+        ->and(AlertDelivery::query()->sole()->event->event_type)->toBe(CheckInEvent::TYPE_MISSED);
+    Queue::assertPushed(DeliverTransitionAlert::class, 1);
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'finished',
+        'exit_code' => 17,
+        'runtime' => 120.0,
+        'execution_id' => $executionId,
+    ]))->assertOk();
+
+    $nonZeroEvent = $monitor->events()->where('event_type', CheckInEvent::TYPE_NON_ZERO_EXIT)->sole();
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->executions()->sole()->status)->toBe(ScheduleExecution::STATUS_FAILED)
+        ->and($nonZeroEvent->exit_code)->toBe(17)
+        ->and($nonZeroEvent->alertDeliveries()->count())->toBe(0)
+        ->and(AlertDelivery::query()->count())->toBe(1);
+    Queue::assertPushed(DeliverTransitionAlert::class, 1);
+});
+
 it('pages only on failure incident entry and rearms after a successful recovery', function (): void {
     Queue::fake();
     $this->travelTo('2026-09-21 18:00:00 UTC');
