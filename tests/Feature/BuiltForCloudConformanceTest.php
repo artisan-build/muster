@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Console\Commands\EvaluateMonitorLateness;
+use App\Jobs\DeliverTransitionAlert;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleReKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleRetireKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\CreateAdminCommand;
@@ -98,6 +99,7 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
             SubjectOffboardCommand::class,
             WarnExpiringCredentialsCommand::class,
             DeliverOwnershipWebhook::class,
+            DeliverTransitionAlert::class,
             'Closure@package/src/SystemAuthoritySchedule.php:27',
         ]),
         'no_signing_path' => [],
