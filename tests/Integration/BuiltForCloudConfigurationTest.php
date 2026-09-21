@@ -61,6 +61,7 @@ it('merges package defaults and auto-discovers the released provider', function 
         'credential_purposes' => ['muster.check-in', 'muster.history.read'],
     ])->and(config('built-for-cloud.product'))->toBe(config('app.name'))
         ->and(config('built-for-cloud.credentials.guard'))->toBe('bfc')
+        ->and(config('auth.guards.bfc'))->toBe(['driver' => 'bfc', 'provider' => 'users'])
         ->and(config('auth.defaults.guard'))->toBe('web')
         ->and(config('auth.providers.users.model'))->toBe(User::class)
         ->and(app()->getLoadedProviders())->toHaveKey(BuiltForCloudServiceProvider::class, true)

@@ -14,7 +14,10 @@ use ArtisanBuild\BuiltForCloud\Credential;
 use ArtisanBuild\BuiltForCloud\CredentialAuthorizationOwnership;
 use ArtisanBuild\BuiltForCloud\CredentialAuthorizationProfile;
 use ArtisanBuild\BuiltForCloud\CredentialPurpose;
+use ArtisanBuild\BuiltForCloud\CredentialStatus;
+use ArtisanBuild\BuiltForCloud\OperatorAbility;
 use ArtisanBuild\BuiltForCloud\Subject;
+use ArtisanBuild\BuiltForCloud\SubjectType;
 use ArtisanBuild\BuiltForCloud\Vitals\HeadlineStat;
 use ArtisanBuild\BuiltForCloud\Vitals\HeadlineUnit;
 use Illuminate\Http\Request;
@@ -30,6 +33,15 @@ final class MusterCredentialDeclaration implements CredentialDeclaration, Declar
 
     public function authorize(Credential $credential, ?string $ability, Request $request): bool
     {
+        if ($credential->subject_type === SubjectType::Operator
+            && $credential->purpose === CredentialPurpose::DashboardMetadata
+            && $credential->status === CredentialStatus::Active
+            && $credential->revoked_at === null
+            && ($credential->expires_at === null || $credential->expires_at->isFuture())
+            && ($credential->abilities ?? []) === [OperatorAbility::MetadataRead->value]) {
+            return $ability === null || $ability === OperatorAbility::MetadataRead->value;
+        }
+
         $partition = CredentialPartition::local();
 
         return $credential->subject_type === $partition->subject_type
