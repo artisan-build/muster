@@ -6,10 +6,10 @@ namespace App\Console\Commands;
 
 use App\Models\CheckInEvent;
 use App\Models\Monitor;
-use Illuminate\Console\Command;
+use ArtisanBuild\BuiltForCloud\Commands\SystemAuthorityCommand;
 use Illuminate\Support\Facades\DB;
 
-final class EvaluateMonitorLateness extends Command
+final class EvaluateMonitorLateness extends SystemAuthorityCommand
 {
     protected $signature = 'monitors:evaluate';
 

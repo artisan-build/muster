@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+use App\Console\Commands\EvaluateMonitorLateness;
 use App\Models\CheckInEvent;
 use App\Models\Monitor;
 use ArtisanBuild\BuiltForCloud\Actions\DecideDeviceAuthorization;
 use ArtisanBuild\BuiltForCloud\Actions\PollDeviceAuthorization;
 use ArtisanBuild\BuiltForCloud\Actions\StartDeviceAuthorization;
+use ArtisanBuild\BuiltForCloud\Commands\SystemAuthorityCommand;
 use ArtisanBuild\BuiltForCloud\StandaloneAccess;
 use ArtisanBuild\BuiltForCloud\User;
 use Carbon\CarbonImmutable;
@@ -63,12 +65,13 @@ function issueStateEngineBearer(): array
     return ['secret' => $token->accessToken->reveal(), 'user' => $user];
 }
 
-it('schedules the lateness evaluator every minute', function (): void {
+it('frames the lateness evaluator as system authority and schedules it every minute', function (): void {
     $event = collect(resolve(Schedule::class)->events())
         ->first(fn (Event $event): bool => $event->command !== null
             && str_contains($event->command, 'monitors:evaluate'));
 
-    expect($event)->not->toBeNull()
+    expect(is_a(EvaluateMonitorLateness::class, SystemAuthorityCommand::class, true))->toBeTrue()
+        ->and($event)->not->toBeNull()
         ->and($event?->expression)->toBe('* * * * *');
 });
 
