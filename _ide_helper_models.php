@@ -14,9 +14,34 @@
 namespace App\Models{
 /**
  * @property int $id
+ * @property int $check_in_event_id
+ * @property string $channel
+ * @property string $destination
+ * @property string $status
+ * @property int $attempt_count
+ * @property string|null $last_error_code
+ * @property CarbonImmutable|null $last_attempt_at
+ * @property CarbonImmutable|null $delivered_at
+ * @property CheckInEvent $event
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery query()
+ * @mixin \Eloquent
+ */
+	#[\AllowDynamicProperties]
+	final class IdeHelperAlertDelivery {}
+}
+
+namespace App\Models{
+/**
+ * @property int $id
  * @property int $monitor_id
  * @property string $event_type
  * @property CarbonImmutable $occurred_at
+ * @property CarbonImmutable|null $last_check_in_at
+ * @property CarbonImmutable|null $next_due_at
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\AlertDelivery> $alertDeliveries
+ * @property-read int|null $alert_deliveries_count
  * @property-read \App\Models\Monitor $monitor
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent newQuery()
@@ -73,6 +98,10 @@ namespace App\Models{
  * @property string $status
  * @property CarbonImmutable|null $last_check_in_at
  * @property CarbonImmutable|null $next_due_at
+ * @property bool $email_alerts_enabled
+ * @property string|null $email_alert_destination
+ * @property bool $webhook_alerts_enabled
+ * @property string|null $webhook_alert_destination
  * @property \Carbon\CarbonImmutable|null $created_at
  * @property \Carbon\CarbonImmutable|null $updated_at
  * @property-read \App\Models\CredentialPartition $credentialPartition

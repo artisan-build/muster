@@ -114,7 +114,7 @@ final class Monitor extends Model
             );
 
             if ($delivery->wasRecentlyCreated) {
-                DeliverTransitionAlert::dispatch($delivery->id)->afterCommit();
+                dispatch(new DeliverTransitionAlert($delivery->id))->afterCommit();
             }
         }
     }
