@@ -1,14 +1,13 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "artisan-build/built-for-cloud-starter",
+    "name": "artisan-build/muster",
     "type": "project",
-    "description": "A nodeless Laravel starter kit for Built for Cloud products.",
+    "description": "Self-hosted heartbeat and cron monitoring for scheduled tasks and background services.",
     "keywords": [
         "laravel",
         "laravel-cloud",
-        "livewire",
-        "nodeless",
-        "starter-kit"
+        "heartbeat-monitoring",
+        "cron-monitoring"
     ],
     "license": "MIT",
     "require": {

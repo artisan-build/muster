@@ -4,27 +4,29 @@ declare(strict_types=1);
 
 return [
     'manifest' => [
-        'name' => null,
-        'slug' => null,
-        'description' => null,
-        'icon' => null,
-        'product_url' => null,
+        'name' => 'Muster',
+        'slug' => 'muster',
+        'description' => 'Self-hosted heartbeat and cron monitoring for scheduled tasks and background services.',
+        'icon' => 'https://scalpels.app/icons/muster.svg',
+        'product_url' => 'https://scalpels.app/products/muster',
     ],
-
     'credentials' => [
-        'guard' => env('BUILT_FOR_CLOUD_CREDENTIAL_GUARD', 'bfc'),
+        'guard' => 'bfc',
         'declaration' => null,
         'session_guard' => null,
-        'app_purposes' => [],
+        'app_purposes' => [
+            'muster.check-in' => 'consumption',
+        ],
     ],
-
     'ui' => [
-        'landing_page' => false,
-        'member_management' => false,
-        'personal_credentials' => false,
-        'installation_credentials' => false,
-        'session_management' => false,
-        'managed_transitions' => false,
-        'credential_purposes' => [],
+        'landing_page' => true,
+        'member_management' => true,
+        'personal_credentials' => true,
+        'installation_credentials' => true,
+        'session_management' => true,
+        'managed_transitions' => true,
+        'credential_purposes' => [
+            0 => 'muster.check-in',
+        ],
     ],
 ];

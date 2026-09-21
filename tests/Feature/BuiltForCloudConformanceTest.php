@@ -115,7 +115,7 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
     ];
 
     $report = (new FleetConformance($this))->assert(new ConsumerConformance(
-        consumer: 'built-for-cloud-starter',
+        consumer: 'muster',
         consumerRoot: base_path(),
         packageRoot: $packageRoot,
         sourceRoots: $sourceRoots,
