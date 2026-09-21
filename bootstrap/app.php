@@ -25,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->validateCsrfTokens(except: [
             'api/monitors/*/check-ins',
+            'api/schedule-events',
         ]);
 
         $middleware->prependToPriorityList(

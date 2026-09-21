@@ -21,7 +21,13 @@
                     <a class="monitor-row" href="{{ route('monitors.show', $monitor) }}">
                         <span>
                             <strong>{{ $monitor->name }}</strong>
-                            <small>Every {{ number_format($monitor->cadence_seconds) }}s + {{ number_format($monitor->grace_seconds) }}s grace</small>
+                            <small>
+                                @if($monitor->expression !== null)
+                                    {{ $monitor->expression }}
+                                @else
+                                    Every {{ number_format($monitor->cadence_seconds) }}s + {{ number_format($monitor->grace_seconds) }}s grace
+                                @endif
+                            </small>
                         </span>
                         <span class="status {{ $monitor->is_enabled ? 'status-enabled' : 'status-disabled' }}">
                             {{ $monitor->is_enabled ? ucfirst($monitor->status) : 'Disabled' }}

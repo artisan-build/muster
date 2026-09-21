@@ -33,9 +33,15 @@ final class MonitorController extends Controller
 
     public function show(Monitor $monitor): View
     {
-        $monitor->load(['events' => fn ($query) => $query
-            ->orderByDesc('occurred_at')
-            ->orderByDesc('id')]);
+        $monitor->load([
+            'events' => fn ($query) => $query
+                ->orderByDesc('occurred_at')
+                ->orderByDesc('id'),
+            'executions' => fn ($query) => $query
+                ->where('status', 'running')
+                ->orderBy('started_at')
+                ->orderBy('id'),
+        ]);
 
         return view('monitors.show', ['monitor' => $monitor]);
     }

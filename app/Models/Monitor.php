@@ -16,12 +16,20 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int $id
  * @property int $credential_partition_id
  * @property string $name
+ * @property string|null $schedule_key
+ * @property string|null $command
+ * @property string|null $display
+ * @property string|null $expression
+ * @property string|null $timezone
  * @property int $cadence_seconds
  * @property int $grace_seconds
  * @property bool $is_enabled
  * @property string $status
  * @property CarbonImmutable|null $last_check_in_at
  * @property CarbonImmutable|null $next_due_at
+ * @property int|null $last_exit_code
+ * @property float|null $last_runtime
+ * @property bool $background
  * @property bool $email_alerts_enabled
  * @property string|null $email_alert_destination
  * @property bool $webhook_alerts_enabled
@@ -34,8 +42,14 @@ final class Monitor extends Model
     /** @var list<string> */
     protected $fillable = [
         'name',
+        'schedule_key',
+        'command',
+        'display',
+        'expression',
+        'timezone',
         'cadence_seconds',
         'grace_seconds',
+        'background',
         'email_alerts_enabled',
         'email_alert_destination',
         'webhook_alerts_enabled',
@@ -55,6 +69,11 @@ final class Monitor extends Model
         });
     }
 
+    public static function scheduleKeyForCommand(string $command): string
+    {
+        return hash('sha256', $command);
+    }
+
     /** @return BelongsTo<CredentialPartition, $this> */
     public function credentialPartition(): BelongsTo
     {
@@ -67,11 +86,21 @@ final class Monitor extends Model
         return $this->hasMany(CheckInEvent::class);
     }
 
-    /** @param list<string> $eventTypes */
-    public function recordActivity(array $eventTypes, CarbonInterface $occurredAt): void
+    /** @return HasMany<ScheduleExecution, $this> */
+    public function executions(): HasMany
+    {
+        return $this->hasMany(ScheduleExecution::class);
+    }
+
+    /**
+     * @param  list<string>  $eventTypes
+     * @param  array<string, mixed>  $attributes
+     */
+    public function recordActivity(array $eventTypes, CarbonInterface $occurredAt, array $attributes = []): void
     {
         foreach ($eventTypes as $eventType) {
             $event = $this->events()->create([
+                ...$attributes,
                 'event_type' => $eventType,
                 'occurred_at' => $occurredAt,
                 'monitor_name' => $this->name,
@@ -129,6 +158,9 @@ final class Monitor extends Model
             'cadence_seconds' => 'integer',
             'grace_seconds' => 'integer',
             'is_enabled' => 'boolean',
+            'last_exit_code' => 'integer',
+            'last_runtime' => 'float',
+            'background' => 'boolean',
             'email_alerts_enabled' => 'boolean',
             'email_alert_destination' => 'encrypted',
             'webhook_alerts_enabled' => 'boolean',

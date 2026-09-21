@@ -23,9 +23,22 @@ namespace App\Models{
  * @property CarbonImmutable|null $last_attempt_at
  * @property CarbonImmutable|null $delivered_at
  * @property CheckInEvent $event
+ * @property \Carbon\CarbonImmutable|null $created_at
+ * @property \Carbon\CarbonImmutable|null $updated_at
  * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery whereAttemptCount($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery whereChannel($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery whereCheckInEventId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery whereDeliveredAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery whereDestination($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery whereLastAttemptAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery whereLastErrorCode($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery whereStatus($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|AlertDelivery whereUpdatedAt($value)
  * @mixin \Eloquent
  */
 	#[\AllowDynamicProperties]
@@ -39,6 +52,14 @@ namespace App\Models{
  * @property string $event_type
  * @property CarbonImmutable $occurred_at
  * @property string|null $monitor_name
+ * @property string|null $command
+ * @property string|null $display
+ * @property string|null $expression
+ * @property string|null $execution_id
+ * @property string|null $timezone
+ * @property int|null $exit_code
+ * @property float|null $runtime
+ * @property bool $background
  * @property CarbonImmutable|null $last_check_in_at
  * @property CarbonImmutable|null $next_due_at
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\AlertDelivery> $alertDeliveries
@@ -47,10 +68,19 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereBackground($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereCommand($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereDisplay($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereEventType($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereExitCode($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereExpression($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereLastCheckInAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereMonitorId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereMonitorName($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereNextDueAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereOccurredAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|CheckInEvent whereRuntime($value)
  * @mixin \Eloquent
  */
 	#[\AllowDynamicProperties]
@@ -93,12 +123,20 @@ namespace App\Models{
  * @property int $id
  * @property int $credential_partition_id
  * @property string $name
+ * @property string|null $schedule_key
+ * @property string|null $command
+ * @property string|null $display
+ * @property string|null $expression
+ * @property string|null $timezone
  * @property int $cadence_seconds
  * @property int $grace_seconds
  * @property bool $is_enabled
  * @property string $status
  * @property CarbonImmutable|null $last_check_in_at
  * @property CarbonImmutable|null $next_due_at
+ * @property int|null $last_exit_code
+ * @property float|null $last_runtime
+ * @property bool $background
  * @property bool $email_alerts_enabled
  * @property string|null $email_alert_destination
  * @property bool $webhook_alerts_enabled
@@ -108,22 +146,57 @@ namespace App\Models{
  * @property-read \App\Models\CredentialPartition $credentialPartition
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\CheckInEvent> $events
  * @property-read int|null $events_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\ScheduleExecution> $executions
+ * @property-read int|null $executions_count
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereBackground($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereCadenceSeconds($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereCommand($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereCreatedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereCredentialPartitionId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereDisplay($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereEmailAlertDestination($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereEmailAlertsEnabled($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereExpression($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereGraceSeconds($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereId($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereIsEnabled($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereLastCheckInAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereLastExitCode($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereLastRuntime($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereName($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereNextDueAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereScheduleKey($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereStatus($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereUpdatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereWebhookAlertDestination($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Monitor whereWebhookAlertsEnabled($value)
  * @mixin \Eloquent
  */
 	#[\AllowDynamicProperties]
 	final class IdeHelperMonitor {}
+}
+
+namespace App\Models{
+/**
+ * @property int $id
+ * @property int $monitor_id
+ * @property string $execution_id
+ * @property string $status
+ * @property CarbonImmutable $started_at
+ * @property CarbonImmutable|null $completed_at
+ * @property float|null $runtime
+ * @property int|null $exit_code
+ * @property bool $background
+ * @property string $timezone
+ * @property-read \App\Models\Monitor|null $monitor
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|ScheduleExecution query()
+ * @mixin \Eloquent
+ */
+	#[\AllowDynamicProperties]
+	final class IdeHelperScheduleExecution {}
 }
