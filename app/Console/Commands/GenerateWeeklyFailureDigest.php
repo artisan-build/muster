@@ -41,7 +41,7 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
             ])
             ->where('occurred_at', '>=', $windowStart)
             ->where('occurred_at', '<', $windowEnd)
-            ->orderBy('occurred_at')
+            ->oldest('occurred_at')
             ->orderBy('id')
             ->get([
                 'id',

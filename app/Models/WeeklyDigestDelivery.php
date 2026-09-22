@@ -20,6 +20,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property string|null $last_error_code
  * @property CarbonImmutable|null $last_attempt_at
  * @property CarbonImmutable|null $delivered_at
+ *
+ * @mixin IdeHelperWeeklyDigestDelivery
  */
 final class WeeklyDigestDelivery extends Model
 {
