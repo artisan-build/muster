@@ -147,3 +147,39 @@ it('rejects invalid monitor timing without persisting a monitor', function (arra
     'cadence must be positive' => [['cadence_seconds' => 0, 'grace_seconds' => 30], 'cadence_seconds'],
     'grace must be nonnegative' => [['cadence_seconds' => 60, 'grace_seconds' => -1], 'grace_seconds'],
 ]);
+
+it('presents enabled monitor states with semantic status badges', function (): void {
+    signInToMuster();
+
+    foreach (['pending', 'healthy', 'running', 'late', 'missed', 'failed'] as $status) {
+        $monitor = Monitor::query()->create([
+            'name' => 'Test Created '.ucfirst($status).' Monitor',
+            'cadence_seconds' => 300,
+            'grace_seconds' => 30,
+        ]);
+        $monitor->forceFill(['status' => $status])->save();
+    }
+
+    $disabled = Monitor::query()->create([
+        'name' => 'Test Created Disabled Monitor',
+        'cadence_seconds' => 300,
+        'grace_seconds' => 30,
+    ]);
+    $disabled->forceFill(['is_enabled' => false])->save();
+
+    $index = $this->get(route('monitors.index'))->assertOk();
+
+    foreach (['pending', 'healthy', 'running', 'late', 'missed', 'failed'] as $status) {
+        $index->assertSee('class="status status-'.$status.'" data-testid="monitor-status"', false)
+            ->assertSee(ucfirst($status));
+    }
+
+    $index->assertSee('class="status status-disabled" data-testid="monitor-status"', false)
+        ->assertSee('Disabled');
+
+    $failed = Monitor::query()->where('status', 'failed')->sole();
+    $this->get(route('monitors.show', $failed))
+        ->assertOk()
+        ->assertSee('class="status status-failed" data-testid="monitor-status"', false)
+        ->assertSee('Failed');
+});

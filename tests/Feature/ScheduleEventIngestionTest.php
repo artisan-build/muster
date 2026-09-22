@@ -175,6 +175,37 @@ it('auto-registers forty enabled commands without subscribing or delivering aler
     Queue::assertNothingPushed();
 });
 
+it('registers a skip-first command as pending until its first real start', function (): void {
+    $this->travelTo('2026-09-21 12:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan scheduler:skip-first --test-created';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'skipped',
+        'execution_id' => null,
+    ]))->assertOk();
+
+    $monitor = Monitor::query()->sole();
+
+    expect($monitor->is_enabled)->toBeTrue()
+        ->and($monitor->status)->toBe('pending')
+        ->and($monitor->executions()->count())->toBe(0)
+        ->and($monitor->events()->pluck('event_type')->all())->toBe([CheckInEvent::TYPE_SKIPPED]);
+
+    $this->travelTo('2026-09-21 12:01:00 UTC');
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command))
+        ->assertOk();
+
+    expect(Monitor::query()->count())->toBe(1)
+        ->and($monitor->refresh()->status)->toBe('running')
+        ->and($monitor->executions()->count())->toBe(1)
+        ->and($monitor->events()->orderBy('id')->pluck('event_type')->all())->toBe([
+            CheckInEvent::TYPE_SKIPPED,
+            CheckInEvent::TYPE_STARTED,
+        ]);
+});
+
 it('correlates overlapping executions and keeps the unfinished invocation visibly open', function (): void {
     $this->travelTo('2026-09-21 13:00:00 UTC');
     $issued = issueScheduleEventBearer();

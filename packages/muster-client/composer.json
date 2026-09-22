@@ -1,0 +1,64 @@
+{
+    "name": "artisan-build/muster-client",
+    "description": "Automatically reports Laravel scheduled command starts, finishes, skips, and failures to Muster.",
+    "keywords": [
+        "cron",
+        "laravel",
+        "monitoring",
+        "scheduler"
+    ],
+    "license": "MIT",
+    "type": "library",
+    "version": "1.0.0",
+    "require": {
+        "php": "^8.3",
+        "artisan-build/bfc-client": "^0.1",
+        "illuminate/console": "^13.0",
+        "illuminate/contracts": "^13.0",
+        "illuminate/http": "^13.0",
+        "illuminate/support": "^13.0"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.9",
+        "laravel/pint": "^1.27",
+        "orchestra/testbench": "^11.0",
+        "pestphp/pest": "^4.0",
+        "phpstan/phpstan": "^2.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "ArtisanBuild\\MusterClient\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "ArtisanBuild\\MusterClient\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "check": [
+            "@lint:test",
+            "@stan",
+            "@test"
+        ],
+        "lint": "pint",
+        "lint:test": "pint --test",
+        "stan": "phpstan analyse --memory-limit=512M",
+        "test": "pest"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "ArtisanBuild\\MusterClient\\MusterClientServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

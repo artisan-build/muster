@@ -49,6 +49,9 @@ jobs:
       - name: Run PHPStan
         run: composer stan
 
+      - name: Run Package Checks
+        run: composer packages:check
+
       - name: Run Tests
         run: ./vendor/bin/pest
 
