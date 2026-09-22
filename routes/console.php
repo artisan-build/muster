@@ -9,3 +9,4 @@ Artisan::command('inspire', function (): void {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('monitors:evaluate')->everyMinute();
+Schedule::command('digests:generate-weekly')->weeklyOn(1, '00:05')->timezone('UTC');
