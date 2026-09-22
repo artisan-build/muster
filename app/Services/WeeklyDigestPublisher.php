@@ -13,12 +13,30 @@ use Throwable;
 
 final readonly class WeeklyDigestPublisher
 {
+    /** @var list<string> */
+    private const array NON_DURABLE_DRIVERS = [
+        'background',
+        'deferred',
+        'null',
+        'sync',
+    ];
+
     private const int PUBLICATION_LEASE_SECONDS = 300;
+
+    private const string UNSUPPORTED_QUEUE_ERROR = 'queue_not_durable';
 
     public function __construct(private Dispatcher $dispatcher) {}
 
     public function publishEligible(?string $weekKey = null): int
     {
+        if (! $this->queueCanPublishDurably()) {
+            $this->eligible($weekKey)->update([
+                'last_error_code' => self::UNSUPPORTED_QUEUE_ERROR,
+            ]);
+
+            return 0;
+        }
+
         $published = 0;
 
         $this->eligible($weekKey)
@@ -31,6 +49,7 @@ final readonly class WeeklyDigestPublisher
                         ->update([
                             'publication_claim_id' => $claimId,
                             'publication_claimed_at' => now(),
+                            'last_error_code' => null,
                         ]);
 
                     if ($claimed !== 1) {
@@ -64,6 +83,57 @@ final readonly class WeeklyDigestPublisher
             });
 
         return $published;
+    }
+
+    private function queueCanPublishDurably(): bool
+    {
+        $connection = config('queue.default');
+
+        return ! is_string($connection) || $this->queueConnectionCanPublishDurably($connection);
+    }
+
+    /** @param array<string, true> $ancestors */
+    private function queueConnectionCanPublishDurably(string $connection, array $ancestors = []): bool
+    {
+        if (isset($ancestors[$connection])) {
+            return false;
+        }
+
+        $configuration = config("queue.connections.{$connection}");
+
+        if (! is_array($configuration)) {
+            return true;
+        }
+
+        $driver = $configuration['driver'] ?? null;
+
+        if (! is_string($driver)) {
+            return true;
+        }
+
+        if (in_array($driver, self::NON_DURABLE_DRIVERS, true)) {
+            return false;
+        }
+
+        if ($driver !== 'failover') {
+            return true;
+        }
+
+        $members = $configuration['connections'] ?? null;
+
+        if (! is_array($members)) {
+            return true;
+        }
+
+        $ancestors[$connection] = true;
+
+        foreach ($members as $member) {
+            if (is_string($member) && ! $this->queueConnectionCanPublishDurably($member, $ancestors)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** @return Builder<WeeklyDigestDelivery> */

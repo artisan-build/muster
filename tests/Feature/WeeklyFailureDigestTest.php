@@ -29,6 +29,10 @@ use Monolog\Handler\TestHandler;
 use Monolog\Logger;
 use Psr\Log\LoggerInterface;
 
+beforeEach(function (): void {
+    config(['queue.default' => 'database']);
+});
+
 function createWeeklyDigestUser(string $label, array $state = [], ?string $email = null): User
 {
     $user = User::query()->create([
@@ -318,6 +322,107 @@ it('reports an evaluator-marked monitor that stays missed throughout the followi
         ->and($payload['still_missed'][0]['reference_at'])->toBe('2026-09-20T12:06:00.000000Z');
 });
 
+it('keeps evaluator transitions on the correct side of the completed digest window', function (
+    string $evaluatedAt,
+    int $expectedMissed,
+): void {
+    Queue::fake();
+    createWeeklyDigestUser("Boundary {$evaluatedAt}");
+    $transitionAt = CarbonImmutable::parse($evaluatedAt, 'UTC');
+    $monitor = createWeeklyDigestMonitor("Test Created Boundary {$evaluatedAt}", [
+        'status' => 'healthy',
+        'next_due_at' => $transitionAt->subMinute(),
+        'grace_seconds' => 60,
+    ]);
+
+    $this->travelTo($transitionAt);
+    $this->artisan('monitors:evaluate')->assertSuccessful();
+
+    expect($monitor->refresh()->status)->toBe('missed')
+        ->and($monitor->events()
+            ->where('event_type', CheckInEvent::TYPE_MISSED)
+            ->sole()
+            ->occurred_at
+            ->toISOString())->toBe($transitionAt->toISOString());
+
+    $this->travelTo('2026-09-28 00:05:00 UTC');
+    $this->artisan('digests:generate-weekly')->assertSuccessful();
+    $payload = WeeklyDigestDelivery::query()->sole()->payload;
+
+    expect($payload['missed'])->toHaveCount($expectedMissed)
+        ->and($payload['non_zero_exit'])->toBe([])
+        ->and($payload['still_missed'])->toBe([]);
+})->with([
+    'in-window transition is listed once' => ['2026-09-24 12:00:00 UTC', 1],
+    'transition exactly at window end is deferred' => ['2026-09-28 00:00:00 UTC', 0],
+    'transition during generator gap is deferred' => ['2026-09-28 00:03:00 UTC', 0],
+]);
+
+it('includes only enabled monitors as ongoing misses', function (bool $enabled, int $expectedStillMissed): void {
+    Queue::fake();
+    config(['mail.default' => 'smtp']);
+    Mail::fake();
+    createWeeklyDigestUser($enabled ? 'Enabled Ongoing Miss' : 'Disabled Ongoing Miss');
+    $monitor = createWeeklyDigestMonitor('Test Created Enablement Ongoing Miss', [
+        'status' => 'healthy',
+        'next_due_at' => '2026-09-20 12:05:00',
+        'grace_seconds' => 60,
+    ]);
+
+    $this->travelTo('2026-09-20 12:06:00 UTC');
+    $this->artisan('monitors:evaluate')->assertSuccessful();
+    $monitor->forceFill(['is_enabled' => $enabled])->save();
+
+    $this->travelTo('2026-09-28 00:05:00 UTC');
+    $this->artisan('digests:generate-weekly')->assertSuccessful();
+    $delivery = WeeklyDigestDelivery::query()->sole();
+
+    expect($delivery->payload['missed'])->toBe([])
+        ->and($delivery->payload['non_zero_exit'])->toBe([])
+        ->and($delivery->payload['still_missed'])->toHaveCount($expectedStillMissed);
+
+    runWeeklyDigestDelivery(new DeliverWeeklyFailureDigest($delivery->id));
+
+    Mail::assertSent(WeeklyFailureDigestMail::class, function (WeeklyFailureDigestMail $mail) use ($enabled): bool {
+        if ($enabled) {
+            $mail->assertDontSeeInHtml('data-testid="weekly-failure-digest-all-clear"', false)
+                ->assertSeeInHtml('Test Created Enablement Ongoing Miss');
+        } else {
+            $mail->assertSeeInHtml('data-testid="weekly-failure-digest-all-clear"', false)
+                ->assertSeeInText('[weekly-failure-digest-all-clear]');
+        }
+
+        return true;
+    });
+})->with([
+    'enabled monitor remains listed' => [true, 1],
+    'disabled monitor permits all-clear' => [false, 0],
+]);
+
+it('retains historical in-window failures after their monitor is disabled', function (): void {
+    Queue::fake();
+    $this->travelTo('2026-09-28 00:05:00 UTC');
+    createWeeklyDigestUser('Disabled Historical Failures');
+    $monitor = createWeeklyDigestMonitor('Test Created Disabled Historical Monitor', [
+        'status' => 'missed',
+        'is_enabled' => false,
+    ]);
+    $missed = createWeeklyDigestEvent($monitor, CheckInEvent::TYPE_MISSED, '2026-09-23 12:00:00');
+    $nonZero = createWeeklyDigestEvent(
+        $monitor,
+        CheckInEvent::TYPE_NON_ZERO_EXIT,
+        '2026-09-24 12:00:00',
+        ['exit_code' => 31],
+    );
+
+    $this->artisan('digests:generate-weekly')->assertSuccessful();
+    $payload = WeeklyDigestDelivery::query()->sole()->payload;
+
+    expect(array_column($payload['missed'], 'id'))->toBe([$missed->id])
+        ->and(array_column($payload['non_zero_exit'], 'id'))->toBe([$nonZero->id])
+        ->and($payload['still_missed'])->toBe([]);
+});
+
 it('materializes every recipient before publication and recovers a failed publication on rerun', function (): void {
     $this->travelTo('2026-09-28 00:05:00 UTC');
     createWeeklyDigestUser('Publication First');
@@ -393,6 +498,96 @@ it('reclaims stale publication claims without stealing live claims or republishi
         ->and($stale->refresh()->published_at)->not->toBeNull()
         ->and($stale->publication_claim_id)->toBeNull();
 });
+
+it('rejects a directly configured non-durable queue and leaves publication recoverable', function (string $driver): void {
+    config([
+        'queue.default' => 'test-non-durable',
+        'queue.connections.test-non-durable' => ['driver' => $driver],
+    ]);
+    $delivery = createWeeklyDigestDelivery("{$driver}-queue@example.test");
+    $dispatcher = Mockery::mock(Dispatcher::class);
+    $dispatcher->shouldReceive('dispatch')->once()->andReturn(null);
+    $publisher = new WeeklyDigestPublisher($dispatcher);
+
+    expect($publisher->publishEligible())->toBe(0)
+        ->and($delivery->refresh()->status)->toBe(WeeklyDigestDelivery::STATUS_PENDING)
+        ->and($delivery->published_at)->toBeNull()
+        ->and($delivery->publication_claim_id)->toBeNull()
+        ->and($delivery->last_error_code)->toBe('queue_not_durable');
+
+    config(['queue.default' => 'database']);
+
+    expect($publisher->publishEligible())->toBe(1)
+        ->and($delivery->refresh()->published_at)->not->toBeNull()
+        ->and($delivery->last_error_code)->toBeNull();
+})->with([
+    'deferred' => ['deferred'],
+    'background' => ['background'],
+    'sync' => ['sync'],
+    'null' => ['null'],
+]);
+
+it('allows durable and unknown queue drivers', function (string $connection, array $connections): void {
+    config(['queue.default' => $connection]);
+
+    foreach ($connections as $name => $configuration) {
+        config(["queue.connections.{$name}" => $configuration]);
+    }
+
+    $delivery = createWeeklyDigestDelivery("{$connection}@example.test");
+    $dispatcher = Mockery::mock(Dispatcher::class);
+    $dispatcher->shouldReceive('dispatch')->once()->andReturn(null);
+
+    expect((new WeeklyDigestPublisher($dispatcher))->publishEligible())->toBe(1)
+        ->and($delivery->refresh()->published_at)->not->toBeNull()
+        ->and($delivery->last_error_code)->toBeNull();
+})->with([
+    'current database connection' => ['database', []],
+    'unknown Cloud-managed driver' => ['cloud-managed', [
+        'cloud-managed' => ['driver' => 'cloud-managed'],
+    ]],
+    'recursive all-durable failover' => ['durable-outer', [
+        'durable-outer' => [
+            'driver' => 'failover',
+            'connections' => ['database', 'durable-inner'],
+        ],
+        'durable-inner' => [
+            'driver' => 'failover',
+            'connections' => ['redis', 'cloud-managed'],
+        ],
+        'cloud-managed' => ['driver' => 'cloud-managed'],
+    ]],
+]);
+
+it('rejects non-durable or cyclic failover graphs', function (string $connection, array $connections): void {
+    config(['queue.default' => $connection]);
+
+    foreach ($connections as $name => $configuration) {
+        config(["queue.connections.{$name}" => $configuration]);
+    }
+
+    $delivery = createWeeklyDigestDelivery("{$connection}@example.test");
+    $dispatcher = Mockery::mock(Dispatcher::class);
+    $dispatcher->shouldNotReceive('dispatch');
+
+    expect((new WeeklyDigestPublisher($dispatcher))->publishEligible())->toBe(0)
+        ->and($delivery->refresh()->status)->toBe(WeeklyDigestDelivery::STATUS_PENDING)
+        ->and($delivery->published_at)->toBeNull()
+        ->and($delivery->publication_claim_id)->toBeNull()
+        ->and($delivery->last_error_code)->toBe('queue_not_durable');
+})->with([
+    'repository database to deferred failover' => ['failover', []],
+    'cyclic failover' => ['cycle-a', [
+        'cycle-a' => [
+            'driver' => 'failover',
+            'connections' => ['database', 'cycle-b'],
+        ],
+        'cycle-b' => [
+            'driver' => 'failover',
+            'connections' => ['cycle-a'],
+        ],
+    ]],
+]);
 
 it('does not queue a digest when no monitored commands exist', function (): void {
     Queue::fake();

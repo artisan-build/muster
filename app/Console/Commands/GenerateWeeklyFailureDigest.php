@@ -54,7 +54,7 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
 
         $payload = $this->payload(
             $events,
-            $this->stillMissed($windowStart, $windowEnd),
+            $this->stillMissed($windowStart),
             $weekKey,
             $windowStart,
             $windowEnd,
@@ -141,15 +141,16 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
     /**
      * @return list<array{monitor_id: int, monitor_name: string, command: string|null, reference_at: string|null, reference_type: string}>
      */
-    private function stillMissed(CarbonImmutable $windowStart, CarbonImmutable $windowEnd): array
+    private function stillMissed(CarbonImmutable $windowStart): array
     {
         $stillMissed = [];
 
         Monitor::query()
             ->where('status', 'missed')
+            ->where('is_enabled', true)
             ->select(['id', 'name', 'command', 'last_check_in_at'])
             ->orderBy('id')
-            ->chunkById(100, function ($monitors) use ($windowStart, $windowEnd, &$stillMissed): void {
+            ->chunkById(100, function ($monitors) use ($windowStart, &$stillMissed): void {
                 foreach ($monitors as $monitor) {
                     $missedEvent = $monitor->events()
                         ->where('event_type', CheckInEvent::TYPE_MISSED)
@@ -158,19 +159,10 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
                         ->first();
 
                     if ($missedEvent === null) {
-                        $stillMissed[] = [
-                            'monitor_id' => $monitor->id,
-                            'monitor_name' => $monitor->name,
-                            'command' => $monitor->command,
-                            'reference_at' => $monitor->last_check_in_at?->toISOString(),
-                            'reference_type' => 'last_check_in_at',
-                        ];
-
                         continue;
                     }
 
-                    if ($missedEvent->occurred_at->greaterThanOrEqualTo($windowStart)
-                        && $missedEvent->occurred_at->lessThan($windowEnd)) {
+                    if ($missedEvent->occurred_at->greaterThanOrEqualTo($windowStart)) {
                         continue;
                     }
 

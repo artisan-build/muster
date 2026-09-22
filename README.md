@@ -52,6 +52,10 @@ Muster is designed for Laravel Cloud. Provision resources in Cloud and let Cloud
 configuration; do not add environment values that shadow Cloud-managed resource variables. No
 deployment environment or resource identifiers are committed to this repository.
 
+Weekly failure digests require a durable queue connection and a continuously running queue worker in
+production. In-process `sync`, `deferred`, `background`, and `null` queue drivers are not supported for
+digest publication.
+
 ## Repository
 
 [artisan-build/muster](https://github.com/artisan-build/muster)
