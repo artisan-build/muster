@@ -32,7 +32,7 @@ final class ScheduleEventReporter
     /** @param array<string, mixed> $payload */
     public function report(array $payload): void
     {
-        if ($this->url === '' || $this->token === '') {
+        if (! $this->isConfigured()) {
             return;
         }
 
@@ -46,6 +46,11 @@ final class ScheduleEventReporter
         } catch (Throwable $exception) {
             $this->debug('Muster schedule event delivery failed; the host command will continue.', $exception);
         }
+    }
+
+    public function isConfigured(): bool
+    {
+        return $this->url !== '' && $this->token !== '';
     }
 
     private function pendingRequest(): PendingRequest

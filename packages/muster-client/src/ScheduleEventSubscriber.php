@@ -12,7 +12,6 @@ use Illuminate\Console\Events\ScheduledTaskSkipped;
 use Illuminate\Console\Events\ScheduledTaskStarting;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Support\Str;
-use Throwable;
 use WeakMap;
 
 final class ScheduleEventSubscriber
@@ -28,30 +27,35 @@ final class ScheduleEventSubscriber
      */
     private WeakMap $executions;
 
+    /** @var WeakMap<Event, true> */
+    private WeakMap $instrumented;
+
     public function __construct(
         private readonly ScheduleEventReporter $reporter,
     ) {
         $this->executions = new WeakMap;
+        $this->instrumented = new WeakMap;
     }
 
     public function starting(ScheduledTaskStarting $event): void
     {
         $task = $event->task;
-        $payload = $this->payloadFor($task);
 
-        if ($payload === null) {
+        if (! $this->reporter->isConfigured()
+            || $this->payloadFor($task) === null
+            || isset($this->instrumented[$task])) {
             return;
         }
 
-        if ($this->willBeSkippedBecauseOverlapping($task)) {
-            $this->reporter->report([
-                ...$payload,
-                'phase' => 'skipped',
-                'exit_code' => null,
-                'runtime' => null,
-                'execution_id' => null,
-            ]);
+        $task->before(fn () => $this->started($task));
+        $this->instrumented[$task] = true;
+    }
 
+    private function started(Event $task): void
+    {
+        $payload = $this->payloadFor($task);
+
+        if ($payload === null) {
             return;
         }
 
@@ -81,6 +85,10 @@ final class ScheduleEventSubscriber
         $context = $this->executions[$task] ?? null;
 
         if ($context === null) {
+            if ($task->skippedBecauseOverlapping) {
+                $this->reportSkipped($task);
+            }
+
             return;
         }
 
@@ -157,9 +165,14 @@ final class ScheduleEventSubscriber
 
     public function skipped(ScheduledTaskSkipped $event): void
     {
-        $payload = $this->payloadFor($event->task);
+        $this->reportSkipped($event->task);
+    }
 
-        if ($payload === null) {
+    private function reportSkipped(Event $task): void
+    {
+        $payload = $this->payloadFor($task);
+
+        if (! $this->reporter->isConfigured() || $payload === null) {
             return;
         }
 
@@ -190,19 +203,6 @@ final class ScheduleEventSubscriber
             'background' => (bool) $task->runInBackground,
             'timezone' => $timezone instanceof DateTimeZone ? $timezone->getName() : $timezone,
         ];
-    }
-
-    private function willBeSkippedBecauseOverlapping(Event $task): bool
-    {
-        if (! $task->withoutOverlapping) {
-            return false;
-        }
-
-        try {
-            return (bool) $task->mutex->exists($task);
-        } catch (Throwable) {
-            return false;
-        }
     }
 
     private function propagateBackgroundExecutionId(Event $task, string $executionId): void

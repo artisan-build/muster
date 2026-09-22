@@ -16,11 +16,20 @@ use Illuminate\Support\Facades\Http;
 
 final class MusterClientTestMutex implements EventMutex
 {
-    public function __construct(public bool $held = false) {}
+    public int $createCalls = 0;
+
+    public int $existsCalls = 0;
+
+    public function __construct(
+        public bool $held = false,
+        public bool $acquirable = true,
+    ) {}
 
     public function create(ScheduledEvent $event): bool
     {
-        if ($this->held) {
+        $this->createCalls++;
+
+        if ($this->held || ! $this->acquirable) {
             return false;
         }
 
@@ -29,6 +38,8 @@ final class MusterClientTestMutex implements EventMutex
 
     public function exists(ScheduledEvent $event): bool
     {
+        $this->existsCalls++;
+
         return $this->held;
     }
 
@@ -74,6 +85,7 @@ function recordedMusterPayloads(): array
 function runMusterForeground(ScheduledEvent $task, float $runtime = 1.25, int $exitCode = 0): void
 {
     Event::dispatch(new ScheduledTaskStarting($task));
+    $task->callBeforeCallbacks(app());
     $task->exitCode = $exitCode;
     Event::dispatch(new ScheduledTaskFinished($task, $runtime));
 
@@ -131,6 +143,7 @@ it('does not finish a background task at foreground dispatch and correlates the 
     $originalMutex = $task->mutexName();
 
     Event::dispatch(new ScheduledTaskStarting($task));
+    $task->callBeforeCallbacks(app());
 
     $started = recordedMusterPayloads()[0];
 
@@ -178,6 +191,7 @@ it('reports a thrown failure with a zero exit code without sending a contradicto
     $task = musterScheduledEvent();
 
     Event::dispatch(new ScheduledTaskStarting($task));
+    $task->callBeforeCallbacks(app());
     $task->exitCode = 0;
     Event::dispatch(new ScheduledTaskFailed($task, new RuntimeException('Test-created callback failure.')));
 
@@ -212,12 +226,38 @@ it('reports overlap and filter skips without creating a running execution', func
         ->and($payloads[1]['execution_id'])->toBeNull();
 });
 
+it('does not report a start when the overlap mutex is lost after the starting event', function (): void {
+    configureMusterClient();
+    Http::fake();
+    $mutex = new MusterClientTestMutex(acquirable: false);
+    $task = musterScheduledEvent(
+        command: 'php artisan reports:raced --test-created',
+        mutex: $mutex,
+    );
+    $task->withoutOverlapping();
+
+    Event::dispatch(new ScheduledTaskStarting($task));
+    $task->run(app());
+    Event::dispatch(new ScheduledTaskFinished($task, 0.01));
+
+    $payloads = recordedMusterPayloads();
+
+    expect($mutex->existsCalls)->toBe(0)
+        ->and($mutex->createCalls)->toBe(1)
+        ->and($task->skippedBecauseOverlapping)->toBeTrue()
+        ->and($payloads)->toHaveCount(1)
+        ->and($payloads[0]['phase'])->toBe('skipped')
+        ->and($payloads[0]['execution_id'])->toBeNull();
+});
+
 it('reports two identical successful runs as distinct executions for one command key', function (): void {
     configureMusterClient();
     Http::fake();
+    $task = musterScheduledEvent();
+    $task->everySecond();
 
-    runMusterForeground(musterScheduledEvent());
-    runMusterForeground(musterScheduledEvent());
+    runMusterForeground($task);
+    runMusterForeground($task);
 
     $payloads = recordedMusterPayloads();
     $starts = collect($payloads)->where('phase', 'started')->values();
@@ -229,17 +269,27 @@ it('reports two identical successful runs as distinct executions for one command
         ->and($starts[0]['key'])->toBe($starts[1]['key'])
         ->and($starts[0]['execution_id'])->not->toBe($starts[1]['execution_id'])
         ->and($finishes[0]['execution_id'])->toBe($starts[0]['execution_id'])
-        ->and($finishes[1]['execution_id'])->toBe($starts[1]['execution_id']);
+        ->and($finishes[1]['execution_id'])->toBe($starts[1]['execution_id'])
+        ->and((new ReflectionProperty($task, 'beforeCallbacks'))->getValue($task))->toHaveCount(1);
 });
 
-it('is inert unless both connection values are configured', function (): void {
+it('leaves background events operationally untouched unless both connection values are configured', function (): void {
     config()->set('muster.url', 'https://muster.test/api/schedule-events');
     config()->set('muster.token', null);
     Http::fake();
+    $task = musterScheduledEvent(background: true);
+    $originalCommand = $task->command;
+    $originalMutexName = $task->mutexName();
+    $originalMutexResolver = $task->mutexNameResolver;
+    $originalBeforeCallbacks = (new ReflectionProperty($task, 'beforeCallbacks'))->getValue($task);
 
-    runMusterForeground(musterScheduledEvent());
+    runMusterForeground($task);
 
     Http::assertNothingSent();
+    expect($task->command)->toBe($originalCommand)
+        ->and($task->mutexName())->toBe($originalMutexName)
+        ->and($task->mutexNameResolver)->toBe($originalMutexResolver)
+        ->and((new ReflectionProperty($task, 'beforeCallbacks'))->getValue($task))->toBe($originalBeforeCallbacks);
 });
 
 it('fails open when Muster cannot receive an event', function (): void {
