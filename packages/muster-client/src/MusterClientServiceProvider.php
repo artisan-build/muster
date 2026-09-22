@@ -20,9 +20,13 @@ use Psr\Log\LoggerInterface;
 
 final class MusterClientServiceProvider extends ServiceProvider
 {
+    private const HTTP_FACTORY = 'artisan-build.muster-client.http';
+
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/muster.php', 'muster');
+
+        $this->app->singleton(self::HTTP_FACTORY, static fn (): Factory => new Factory);
 
         $this->app->singleton(ScheduleEventReporter::class, function (Application $app): ScheduleEventReporter {
             return new ScheduleEventReporter(
@@ -30,13 +34,16 @@ final class MusterClientServiceProvider extends ServiceProvider
                 token: (string) config('muster.token'),
                 connectTimeout: (float) config('muster.connect_timeout'),
                 timeout: (float) config('muster.timeout'),
-                http: $app->make(Factory::class),
+                http: self::http($app),
                 logger: $app->make(LoggerInterface::class),
             );
         });
 
         $this->app->singleton(ScheduleEventSubscriber::class);
-        $this->app->singleton(LoopbackAuthorizer::class);
+        $this->app->singleton(
+            LoopbackAuthorizer::class,
+            static fn (Application $app): LoopbackAuthorizer => new LoopbackAuthorizer(self::http($app)),
+        );
         $this->app->singleton(EnvironmentFileWriter::class);
     }
 
@@ -92,5 +99,11 @@ final class MusterClientServiceProvider extends ServiceProvider
         if (parse_url((string) $url, PHP_URL_SCHEME) !== 'https') {
             Log::warning('Muster URL is not HTTPS; MUSTER_TOKEN will be sent over plaintext transport.');
         }
+    }
+
+    private static function http(Application $app): Factory
+    {
+        /** @var Factory */
+        return $app->make(self::HTTP_FACTORY);
     }
 }

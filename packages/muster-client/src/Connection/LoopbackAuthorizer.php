@@ -14,6 +14,8 @@ class LoopbackAuthorizer
 
     private const CALLBACK_TIMEOUT_SECONDS = 180;
 
+    private const RESPONSE_LIMIT_BYTES = 24 * 1024;
+
     public function __construct(private readonly Factory $http) {}
 
     /** @param Closure(string): void $presentAuthorizationUrl */
@@ -44,7 +46,19 @@ class LoopbackAuthorizer
             ->asJson()
             ->connectTimeout(3)
             ->timeout(10)
-            ->withOptions(['allow_redirects' => false])
+            ->withOptions([
+                'allow_redirects' => false,
+                'progress' => static function (
+                    int $downloadTotal,
+                    int $downloadedBytes,
+                    int $uploadTotal,
+                    int $uploadedBytes,
+                ): void {
+                    if ($downloadedBytes > self::RESPONSE_LIMIT_BYTES) {
+                        throw new RuntimeException('Muster authorization response exceeded 24 KiB.');
+                    }
+                },
+            ])
             ->post($origin.'/bfc/loopback/token', [
                 'code' => $code,
                 'redirect_uri' => $redirectUri,
@@ -52,7 +66,7 @@ class LoopbackAuthorizer
             ]);
 
         $body = $response->body();
-        $payload = strlen($body) <= 24 * 1024 ? json_decode($body, true) : null;
+        $payload = strlen($body) <= self::RESPONSE_LIMIT_BYTES ? json_decode($body, true) : null;
 
         if ($response->status() !== 200
             || ! is_array($payload)

@@ -6,9 +6,16 @@ use ArtisanBuild\MusterClient\Connection\LoopbackAuthorizer;
 use ArtisanBuild\MusterClient\Connection\LoopbackCallbackListener;
 use ArtisanBuild\MusterClient\Connection\NativeLoopbackCallbackListener;
 use ArtisanBuild\MusterClient\EnvironmentFileWriter;
+use ArtisanBuild\MusterClient\ScheduleEventReporter;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Http\Client\Events\RequestSending;
+use Illuminate\Http\Client\Events\ResponseReceived;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
 
 final class MusterClientTestLoopbackListener implements LoopbackCallbackListener
 {
@@ -217,7 +224,7 @@ it('completes loopback PKCE exchange while containing the code verifier and bear
     $token = 'test-created-exchanged-token';
     $listener = new MusterClientTestLoopbackListener($code);
     $presentedUrl = null;
-    Http::fake([
+    musterClientPrivateHttp()->fake([
         'https://muster.test/bfc/loopback/token' => Http::response([
             'access_token' => $token,
             'token_type' => 'Bearer',
@@ -225,13 +232,13 @@ it('completes loopback PKCE exchange while containing the code verifier and bear
             'app_purpose' => 'muster.check-in',
         ]),
     ]);
-    $authorizer = new MusterClientTestLoopbackAuthorizer(app(Factory::class), $listener);
+    $authorizer = new MusterClientTestLoopbackAuthorizer(musterClientPrivateHttp(), $listener);
 
     $result = $authorizer->authorize('https://muster.test', function (string $url) use (&$presentedUrl): void {
         $presentedUrl = $url;
     });
 
-    $request = Http::recorded()->sole()[0];
+    $request = musterClientPrivateHttp()->recorded()->sole()[0];
     $exchange = $request->data();
     $query = [];
     parse_str((string) parse_url((string) $presentedUrl, PHP_URL_QUERY), $query);
@@ -273,10 +280,10 @@ it('accepts one well-formed code on the exact loopback callback', function (): v
 
 it('rejects unsuccessful or incorrectly bound loopback exchanges', function (int $status, array $payload): void {
     $listener = new MusterClientTestLoopbackListener(str_repeat('c', 43));
-    Http::fake([
+    musterClientPrivateHttp()->fake([
         'https://muster.test/bfc/loopback/token' => Http::response($payload, $status),
     ]);
-    $authorizer = new MusterClientTestLoopbackAuthorizer(app(Factory::class), $listener);
+    $authorizer = new MusterClientTestLoopbackAuthorizer(musterClientPrivateHttp(), $listener);
 
     expect(fn (): string => $authorizer->authorize('https://muster.test', static function (): void {}))
         ->toThrow(RuntimeException::class, 'Muster could not exchange the authorization grant.')
@@ -287,6 +294,103 @@ it('rejects unsuccessful or incorrectly bound loopback exchanges', function (int
     'wrong app purpose' => [200, ['access_token' => 'test-created-token', 'token_type' => 'Bearer', 'credential_id' => 'id', 'app_purpose' => 'muster.history.read']],
     'missing credential id' => [200, ['access_token' => 'test-created-token', 'token_type' => 'Bearer', 'app_purpose' => 'muster.check-in']],
 ]);
+
+it('rejects an exchange response while more than 24 KiB is being received', function (): void {
+    $listener = new MusterClientTestLoopbackListener(str_repeat('c', 43));
+    $progressCalled = false;
+    musterClientPrivateHttp()->fake(function (Request $request, array $options) use (&$progressCalled) {
+        expect($request->url())->toBe('https://muster.test/bfc/loopback/token')
+            ->and($options['progress'] ?? null)->toBeCallable();
+
+        $progressCalled = true;
+        $options['progress'](25 * 1024, 24 * 1024, 0, 0);
+        $options['progress'](25 * 1024, (24 * 1024) + 1, 0, 0);
+
+        return Http::response([
+            'access_token' => 'test-created-token',
+            'token_type' => 'Bearer',
+            'credential_id' => 'test-created-credential-id',
+            'app_purpose' => 'muster.check-in',
+        ]);
+    });
+    $authorizer = new MusterClientTestLoopbackAuthorizer(musterClientPrivateHttp(), $listener);
+
+    expect(fn (): string => $authorizer->authorize('https://muster.test', static function (): void {}))
+        ->toThrow(RuntimeException::class, 'Muster authorization response exceeded 24 KiB.')
+        ->and($progressCalled)->toBeTrue();
+});
+
+it('keeps credential material outside host HTTP middleware and events', function (): void {
+    $code = str_repeat('c', 43);
+    $exchangeToken = 'test-created-exchanged-token';
+    $runtimeToken = 'test-created-runtime-token';
+    $listener = new MusterClientTestLoopbackListener($code);
+    $observations = [];
+    $privateHttp = musterClientPrivateHttp();
+
+    config()->set('muster.url', 'https://muster.test/api/schedule-events');
+    config()->set('muster.token', $runtimeToken);
+    config()->set('bfc-client.identity', 'test-created-installation');
+
+    $responseFor = static fn (Request $request) => str_ends_with($request->url(), '/bfc/loopback/token')
+        ? Http::response([
+            'access_token' => $exchangeToken,
+            'token_type' => 'Bearer',
+            'credential_id' => 'test-created-credential-id',
+            'app_purpose' => 'muster.check-in',
+        ])
+        : Http::response(status: 204);
+
+    $privateHttp->fake($responseFor);
+    Http::fake($responseFor);
+    Http::globalRequestMiddleware(function (RequestInterface $request) use (&$observations): RequestInterface {
+        $observations[] = 'middleware-request '.json_encode($request->getHeaders(), JSON_THROW_ON_ERROR).' '.$request->getBody();
+
+        return $request;
+    });
+    Http::globalResponseMiddleware(function (ResponseInterface $response) use (&$observations): ResponseInterface {
+        $observations[] = 'middleware-response '.$response->getBody();
+
+        return $response;
+    });
+    Event::listen(RequestSending::class, function (RequestSending $event) use (&$observations): void {
+        $observations[] = 'request-event '.json_encode($event->request->headers(), JSON_THROW_ON_ERROR).' '.$event->request->body();
+    });
+    Event::listen(ResponseReceived::class, function (ResponseReceived $event) use (&$observations): void {
+        $observations[] = 'response-event '.$event->response->body();
+    });
+
+    $resolvedAuthorizer = app(LoopbackAuthorizer::class);
+    $authorizerHttp = (new ReflectionProperty(LoopbackAuthorizer::class, 'http'))->getValue($resolvedAuthorizer);
+    $authorizer = new MusterClientTestLoopbackAuthorizer($authorizerHttp, $listener);
+    $result = $authorizer->authorize('https://muster.test', static function (): void {});
+
+    app(ScheduleEventReporter::class)->report(['phase' => 'started']);
+
+    $records = $privateHttp->recorded()->all();
+    $exchangeRequest = $records[0][0];
+    $exchangeResponse = $records[0][1];
+    $runtimeRequest = $records[1][0];
+    $verifier = $exchangeRequest->data()['code_verifier'];
+
+    expect($authorizerHttp)->toBe($privateHttp)
+        ->and($result)->toBe($exchangeToken)
+        ->and($records)->toHaveCount(2)
+        ->and($exchangeRequest->url())->toBe('https://muster.test/bfc/loopback/token')
+        ->and($exchangeRequest->data()['code'])->toBe($code)
+        ->and($verifier)->toMatch('/\A[A-Za-z0-9._~-]{43,128}\z/D')
+        ->and($exchangeResponse?->json('access_token'))->toBe($exchangeToken)
+        ->and($runtimeRequest->url())->toBe('https://muster.test/api/schedule-events')
+        ->and($runtimeRequest->hasHeader('Authorization', 'Bearer '.$runtimeToken))->toBeTrue()
+        ->and($runtimeRequest->hasHeader('X-BfC-Client-Id', 'test-created-installation'))->toBeTrue()
+        ->and($observations)->toBe([]);
+
+    foreach ([$code, $verifier, $exchangeToken, $runtimeToken] as $secret) {
+        expect(implode("\n", $observations))->not->toContain($secret);
+    }
+
+    Http::assertNothingSent();
+});
 
 it('aborts on an outside environment edit without overwriting it', function (): void {
     $directory = musterClientEnvironmentDirectory();

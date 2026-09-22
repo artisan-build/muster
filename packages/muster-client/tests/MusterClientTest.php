@@ -12,7 +12,6 @@ use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 use Illuminate\Console\Scheduling\EventMutex;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Event;
-use Illuminate\Support\Facades\Http;
 
 final class MusterClientTestMutex implements EventMutex
 {
@@ -76,7 +75,7 @@ function musterScheduledEvent(
 /** @return list<array<string, mixed>> */
 function recordedMusterPayloads(): array
 {
-    return Http::recorded()
+    return musterClientPrivateHttp()->recorded()
         ->map(fn (array $record): array => $record[0]->data())
         ->values()
         ->all();
@@ -96,7 +95,7 @@ function runMusterForeground(ScheduledEvent $task, float $runtime = 1.25, int $e
 
 it('reports distinct starts and finishes with stable command identity and no output', function (): void {
     configureMusterClient();
-    Http::fake();
+    musterClientPrivateHttp()->fake();
     $task = musterScheduledEvent(timezone: new DateTimeZone('Europe/Zurich'));
 
     runMusterForeground($task, runtime: 2.75);
@@ -116,13 +115,13 @@ it('reports distinct starts and finishes with stable command identity and no out
         expect($payload)->not->toHaveKey('output');
     }
 
-    Http::assertSent(fn (Request $request): bool => $request->hasHeader('Authorization', 'Bearer test-created-token')
+    musterClientPrivateHttp()->assertSent(fn (Request $request): bool => $request->hasHeader('Authorization', 'Bearer test-created-token')
         && $request->hasHeader('X-BfC-Client-Id', 'test-created-installation'));
 });
 
 it('keeps the same key when only the cron expression changes', function (): void {
     configureMusterClient();
-    Http::fake();
+    musterClientPrivateHttp()->fake();
 
     runMusterForeground(musterScheduledEvent(expression: '* * * * *'));
     runMusterForeground(musterScheduledEvent(expression: '*/5 * * * *'));
@@ -137,7 +136,7 @@ it('keeps the same key when only the cron expression changes', function (): void
 
 it('does not finish a background task at foreground dispatch and correlates the child completion', function (): void {
     configureMusterClient();
-    Http::fake();
+    musterClientPrivateHttp()->fake();
     $task = musterScheduledEvent(background: true);
     $originalCommand = $task->command;
     $originalMutex = $task->mutexName();
@@ -173,7 +172,7 @@ it('does not finish a background task at foreground dispatch and correlates the 
 
 it('reports a non-zero foreground exit as failed rather than finished', function (): void {
     configureMusterClient();
-    Http::fake();
+    musterClientPrivateHttp()->fake();
 
     runMusterForeground(musterScheduledEvent(), exitCode: 12);
 
@@ -187,7 +186,7 @@ it('reports a non-zero foreground exit as failed rather than finished', function
 
 it('reports a thrown failure with a zero exit code without sending a contradictory zero', function (): void {
     configureMusterClient();
-    Http::fake();
+    musterClientPrivateHttp()->fake();
     $task = musterScheduledEvent();
 
     Event::dispatch(new ScheduledTaskStarting($task));
@@ -204,7 +203,7 @@ it('reports a thrown failure with a zero exit code without sending a contradicto
 
 it('reports overlap and filter skips without creating a running execution', function (): void {
     configureMusterClient();
-    Http::fake();
+    musterClientPrivateHttp()->fake();
     $overlap = musterScheduledEvent(
         command: 'php artisan reports:overlap --test-created',
         mutex: new MusterClientTestMutex(held: true),
@@ -228,7 +227,7 @@ it('reports overlap and filter skips without creating a running execution', func
 
 it('does not report a start when the overlap mutex is lost after the starting event', function (): void {
     configureMusterClient();
-    Http::fake();
+    musterClientPrivateHttp()->fake();
     $mutex = new MusterClientTestMutex(acquirable: false);
     $task = musterScheduledEvent(
         command: 'php artisan reports:raced --test-created',
@@ -252,7 +251,7 @@ it('does not report a start when the overlap mutex is lost after the starting ev
 
 it('reports two identical successful runs as distinct executions for one command key', function (): void {
     configureMusterClient();
-    Http::fake();
+    musterClientPrivateHttp()->fake();
     $task = musterScheduledEvent();
     $task->everySecond();
 
@@ -276,7 +275,7 @@ it('reports two identical successful runs as distinct executions for one command
 it('leaves background events operationally untouched unless both connection values are configured', function (): void {
     config()->set('muster.url', 'https://muster.test/api/schedule-events');
     config()->set('muster.token', null);
-    Http::fake();
+    musterClientPrivateHttp()->fake();
     $task = musterScheduledEvent(background: true);
     $originalCommand = $task->command;
     $originalMutexName = $task->mutexName();
@@ -285,7 +284,7 @@ it('leaves background events operationally untouched unless both connection valu
 
     runMusterForeground($task);
 
-    Http::assertNothingSent();
+    musterClientPrivateHttp()->assertNothingSent();
     expect($task->command)->toBe($originalCommand)
         ->and($task->mutexName())->toBe($originalMutexName)
         ->and($task->mutexNameResolver)->toBe($originalMutexResolver)
@@ -294,7 +293,7 @@ it('leaves background events operationally untouched unless both connection valu
 
 it('fails open when Muster cannot receive an event', function (): void {
     configureMusterClient();
-    Http::fake(fn (): never => throw new RuntimeException('Test-created outage.'));
+    musterClientPrivateHttp()->fake(fn (): never => throw new RuntimeException('Test-created outage.'));
 
     runMusterForeground(musterScheduledEvent());
 
