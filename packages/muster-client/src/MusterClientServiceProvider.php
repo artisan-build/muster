@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ArtisanBuild\MusterClient;
 
 use ArtisanBuild\MusterClient\Commands\InstallCommand;
+use ArtisanBuild\MusterClient\Connection\LoopbackAuthorizer;
 use Illuminate\Console\Events\ScheduledBackgroundTaskFinished;
 use Illuminate\Console\Events\ScheduledTaskFailed;
 use Illuminate\Console\Events\ScheduledTaskFinished;
@@ -35,6 +36,8 @@ final class MusterClientServiceProvider extends ServiceProvider
         });
 
         $this->app->singleton(ScheduleEventSubscriber::class);
+        $this->app->singleton(LoopbackAuthorizer::class);
+        $this->app->singleton(EnvironmentFileWriter::class);
     }
 
     public function boot(Dispatcher $events): void

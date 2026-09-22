@@ -18,21 +18,21 @@ php artisan config:clear
 ```
 
 The installer asks for the full schedule-event endpoint, normally
-`https://muster.example/api/schedule-events`, and a `muster.check-in` bearer credential. It writes
-`MUSTER_URL` and `MUSTER_TOKEN` to the application's environment. The package is inert unless both
-values are non-empty.
+`https://muster.example/api/schedule-events`. It then binds a temporary loopback listener, prints the
+Muster authorization URL, and opens it in the browser where supported. Sign in to Muster, review the
+`muster.check-in` grant, and approve it. The one-time callback and PKCE exchange happen locally; the
+bearer is never printed. The installer writes `MUSTER_URL` and `MUSTER_TOKEN` to the application's
+environment only after authorization succeeds. The package is inert unless both values are non-empty.
 
-For Laravel Cloud or Forge, use Scalpels' connection flow so it writes the URL and credential directly
-to the target environment without returning the plaintext credential. For another host, use the
-customer's Built for Cloud device-authorization flow for the `muster.check-in` app purpose, approve it
-in the authenticated Muster deployment, and enter the returned token in `muster:install`'s hidden
-prompt. The schedule-event endpoint accepts that protocol-bound bearer; a generic credential minted by
-`bfc:credential:mint` is deliberately not interchangeable with it.
+For a manually issued protocol-bound bearer, run `php artisan muster:install --manual-token` and use
+the hidden prompt. This is a fallback, not the recommended connection path. Do not pass a real bearer
+with `--token`: command arguments can be retained in shell history, process listings, and transcripts.
+A generic credential minted by `bfc:credential:mint` is deliberately not interchangeable with the
+bound bearer issued by the browser ceremony.
 
-Put the revealed value directly into the source application's secret environment as `MUSTER_TOKEN`;
-never commit it or pass it through chat. `muster-client` also carries `artisan-build/bfc-client`, which
-adds the source installation's opaque `X-BfC-Client-Id` label to requests. That identity is not a
-credential.
+Never commit a bearer or pass it through chat. `muster-client` also carries
+`artisan-build/bfc-client`, which adds the source installation's opaque `X-BfC-Client-Id` label to
+requests. That identity is not a credential.
 
 ## Behaviour
 

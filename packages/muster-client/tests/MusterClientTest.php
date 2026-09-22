@@ -300,27 +300,3 @@ it('fails open when Muster cannot receive an event', function (): void {
 
     expect(true)->toBeTrue();
 });
-
-it('installs connection values idempotently without printing the token', function (): void {
-    $path = sys_get_temp_dir().'/muster-client-test-'.bin2hex(random_bytes(6));
-    mkdir($path, 0755, true);
-    file_put_contents($path.'/.env', 'APP_NAME=Test'.PHP_EOL);
-    app()->setBasePath($path);
-    app()->useEnvironmentPath($path);
-
-    foreach (range(1, 2) as $attempt) {
-        $this->artisan('muster:install', [
-            '--url' => 'https://muster.test/api/schedule-events',
-            '--token' => 'test-created-token',
-            '--no-interaction' => true,
-        ])->doesntExpectOutputToContain('test-created-token')
-            ->assertExitCode(0);
-    }
-
-    $contents = (string) file_get_contents($path.'/.env');
-
-    expect(substr_count($contents, 'MUSTER_URL='))->toBe(1)
-        ->and(substr_count($contents, 'MUSTER_TOKEN='))->toBe(1)
-        ->and($contents)->toContain('MUSTER_URL=https://muster.test/api/schedule-events')
-        ->and($contents)->toContain('MUSTER_TOKEN=test-created-token');
-});

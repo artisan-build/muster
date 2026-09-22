@@ -39,7 +39,8 @@
         "check": [
             "@lint:test",
             "@stan",
-            "@test"
+            "@test",
+            "composer audit --locked --no-interaction"
         ],
         "lint": "pint",
         "lint:test": "pint --test",
@@ -54,6 +55,9 @@
         }
     },
     "config": {
+        "platform": {
+            "php": "8.3.0"
+        },
         "sort-packages": true,
         "allow-plugins": {
             "pestphp/pest-plugin": true
