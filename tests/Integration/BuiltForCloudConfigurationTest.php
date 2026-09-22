@@ -31,7 +31,7 @@ it('matches the canonical Muster manifest and purpose contracts', function (): v
             'installation_credentials' => true,
             'session_management' => true,
             'managed_transitions' => true,
-            'credential_purposes' => ['muster.check-in', 'muster.history.read'],
+            'credential_purposes' => [],
         ]);
 });
 
@@ -58,7 +58,7 @@ it('merges package defaults and auto-discovers the released provider', function 
         'installation_credentials' => true,
         'session_management' => true,
         'managed_transitions' => true,
-        'credential_purposes' => ['muster.check-in', 'muster.history.read'],
+        'credential_purposes' => [],
     ])->and(config('built-for-cloud.product'))->toBe(config('app.name'))
         ->and(config('built-for-cloud.credentials.guard'))->toBe('bfc')
         ->and(config('auth.guards.bfc'))->toBe(['driver' => 'bfc', 'provider' => 'users'])

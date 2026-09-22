@@ -29,7 +29,7 @@
                                 @endif
                             </small>
                         </span>
-                        <span class="status {{ $monitor->is_enabled ? 'status-enabled' : 'status-disabled' }}">
+                        <span class="status {{ $monitor->is_enabled ? 'status-'.$monitor->status : 'status-disabled' }}" data-testid="monitor-status">
                             {{ $monitor->is_enabled ? ucfirst($monitor->status) : 'Disabled' }}
                         </span>
                     </a>

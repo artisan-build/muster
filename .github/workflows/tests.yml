@@ -49,6 +49,9 @@ jobs:
       - name: Run PHPStan
         run: composer stan
 
+      - name: Run Package Checks
+        run: composer packages:check
+
       - name: Run Tests
         run: ./vendor/bin/pest
 
@@ -59,3 +62,29 @@ jobs:
       # Keeping it after the tests means the test signal is still there when that happens.
       - name: Run Security Audit
         run: composer audit
+
+  package-php83:
+    name: package (8.3)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/muster-client
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          coverage: none
+
+      - name: Install locked package dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Run package checks
+        run: composer check

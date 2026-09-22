@@ -11,7 +11,7 @@
 
     <section class="detail-grid" data-testid="monitor-detail-summary">
         <article class="panel signal-card">
-            <span class="status {{ $monitor->is_enabled ? 'status-enabled' : 'status-disabled' }}">
+            <span class="status {{ $monitor->is_enabled ? 'status-'.$monitor->status : 'status-disabled' }}" data-testid="monitor-status">
                 {{ $monitor->is_enabled ? ucfirst($monitor->status) : 'Disabled' }}
             </span>
             <dl>

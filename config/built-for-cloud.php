@@ -26,9 +26,6 @@ return [
         'installation_credentials' => true,
         'session_management' => true,
         'managed_transitions' => true,
-        'credential_purposes' => [
-            0 => 'muster.check-in',
-            1 => 'muster.history.read',
-        ],
+        'credential_purposes' => [],
     ],
 ];

@@ -57,7 +57,11 @@ h1 { margin: 0; overflow-wrap: anywhere; font-family: Georgia, serif; font-size:
 
 .status { flex: none; display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .65rem; border-radius: 999px; font-size: .72rem; font-weight: 750; text-transform: uppercase; letter-spacing: .08em; }
 .status::before { width: .45rem; height: .45rem; border-radius: 50%; background: currentColor; content: ''; }
-.status-enabled { background: rgba(79, 222, 151, .12); color: #73edae; }
+.status-pending { background: rgba(168, 193, 184, .1); color: #a8c1b8; }
+.status-healthy { background: rgba(79, 222, 151, .12); color: #73edae; }
+.status-running { background: rgba(101, 171, 255, .12); color: #8bc2ff; }
+.status-late { background: rgba(255, 193, 92, .12); color: #ffd07a; }
+.status-missed, .status-failed { background: rgba(255, 112, 112, .12); color: #ff9a9a; }
 .status-disabled { background: rgba(168, 193, 184, .1); color: #a8c1b8; }
 
 .form-panel { max-width: 44rem; padding: clamp(1.2rem, 4vw, 2rem); }

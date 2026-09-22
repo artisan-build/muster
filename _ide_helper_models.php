@@ -233,9 +233,30 @@ namespace App\Models{
  * @property string|null $processing_claim_id
  * @property CarbonImmutable|null $processing_claimed_at
  * @property CarbonImmutable|null $delivered_at
+ * @property \Carbon\CarbonImmutable|null $created_at
+ * @property \Carbon\CarbonImmutable|null $updated_at
  * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereAttemptCount($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereDeliveredAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereLastAttemptAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereLastErrorCode($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery wherePayload($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereProcessingClaimId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereProcessingClaimedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery wherePublicationClaimId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery wherePublicationClaimedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery wherePublishedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereRecipient($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereStatus($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereUpdatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereUserId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereWeekKey($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereWindowEnd($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|WeeklyDigestDelivery whereWindowStart($value)
  * @mixin \Eloquent
  */
 	#[\AllowDynamicProperties]

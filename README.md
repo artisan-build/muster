@@ -11,17 +11,22 @@ is not a metrics or log store.
 ## What It Does
 
 - Provides authenticated monitor creation, listing, detail, editing, and enable/disable controls.
-- Stores each monitor's expected cadence, grace period, enabled state, and current timing fields.
+- Auto-registers a connected Laravel application's scheduled commands from their real expressions.
+- Tracks distinct starts, finishes, non-zero exits, skips, and unfinished executions.
+- Sends a weekly account-level digest of missed and failed commands.
 - Reports the enabled-monitor count as its bounded Built for Cloud headline stat.
 
-Check-in ingestion, missed/recovered evaluation, event history, and alerts are not part of this
-foundation slice yet.
+Install [`artisan-build/muster-client`](packages/muster-client/README.md) in a Laravel application to
+connect its scheduler without adding per-command check-in calls.
 
 ## Built For Cloud
 
 Muster is a [Built for Cloud catalog product](https://scalpels.app/products/muster). Its canonical
 manifest is maintained in `config/built-for-cloud.php`, with `muster.check-in` declared as a
-consumption purpose. The check-in endpoint and credential authorization are not implemented yet.
+consumption purpose. The client authenticates schedule events with a package-issued bearer credential.
+Exact scheduled command strings are sensitive stored data. Do not put credentials in command-line
+arguments; Muster stores commands for identity and may show them in its authenticated UI and weekly
+digest.
 
 Built for Cloud provides the human authentication used by Muster's monitor routes through the
 package-owned `bfc.auth` middleware.

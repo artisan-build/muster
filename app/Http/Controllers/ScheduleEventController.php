@@ -70,7 +70,7 @@ final class ScheduleEventController extends Controller
             }
 
             if ($monitor === null) {
-                $registered = $partition->monitors()->firstOrCreate(
+                $registered = $partition->monitors()->createOrFirst(
                     ['schedule_key' => $expectedKey],
                     [
                         'name' => $payload['display'],
