@@ -11,11 +11,11 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
 use Throwable;
 
-final class WeeklyDigestPublisher
+final readonly class WeeklyDigestPublisher
 {
     private const int PUBLICATION_LEASE_SECONDS = 300;
 
-    public function __construct(private readonly Dispatcher $dispatcher) {}
+    public function __construct(private Dispatcher $dispatcher) {}
 
     public function publishEligible(?string $weekKey = null): int
     {
