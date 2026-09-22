@@ -106,6 +106,10 @@ final class MonitorTokenController extends Controller
         string $monitorId,
         bool $lock = false,
     ): ?Monitor {
+        if (! ctype_digit($monitorId)) {
+            return null;
+        }
+
         $query = Monitor::query()
             ->select('monitors.*')
             ->join('credential_partitions as partition', 'partition.id', '=', 'monitors.credential_partition_id')
