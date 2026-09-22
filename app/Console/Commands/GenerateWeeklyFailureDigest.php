@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
-use App\Jobs\DeliverWeeklyFailureDigest;
 use App\Models\CheckInEvent;
 use App\Models\Monitor;
 use App\Models\WeeklyDigestDelivery;
+use App\Services\WeeklyDigestPublisher;
 use ArtisanBuild\BuiltForCloud\Commands\SystemAuthorityCommand;
 use ArtisanBuild\BuiltForCloud\User;
 use Carbon\CarbonImmutable;
@@ -20,7 +20,7 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
 
     protected $description = 'Queue the automatic account-level failure digest for the last complete UTC week.';
 
-    public function handle(): int
+    public function handle(WeeklyDigestPublisher $publisher): int
     {
         // A digest covers the previous complete UTC ISO week: [Monday 00:00, Monday 00:00).
         $windowEnd = CarbonImmutable::now('UTC')->startOfWeek(CarbonInterface::MONDAY);
@@ -52,17 +52,23 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
                 'exit_code',
             ]);
 
-        $payload = $this->payload($events, $weekKey, $windowStart, $windowEnd, $monitorCount);
-        $queued = 0;
+        $payload = $this->payload(
+            $events,
+            $this->stillMissed($windowStart, $windowEnd),
+            $weekKey,
+            $windowStart,
+            $windowEnd,
+            $monitorCount,
+        );
 
         User::query()
             ->where('status', 'active')
             ->where('email_is_generated', false)
             ->select(['id', 'email'])
             ->orderBy('id')
-            ->chunkById(100, function ($users) use ($payload, $weekKey, $windowStart, $windowEnd, &$queued): void {
+            ->chunkById(100, function ($users) use ($payload, $weekKey, $windowStart, $windowEnd): void {
                 foreach ($users as $user) {
-                    $delivery = WeeklyDigestDelivery::query()->firstOrCreate(
+                    WeeklyDigestDelivery::query()->firstOrCreate(
                         [
                             'user_id' => $user->id,
                             'week_key' => $weekKey,
@@ -75,14 +81,10 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
                         ],
                     );
 
-                    if (! $delivery->wasRecentlyCreated) {
-                        continue;
-                    }
-
-                    dispatch(new DeliverWeeklyFailureDigest($delivery->id))->afterCommit();
-                    $queued++;
                 }
             });
+
+        $queued = $publisher->publishEligible($weekKey);
 
         $this->info("Queued {$queued} weekly failure digest delivery(s) for {$weekKey}.");
 
@@ -91,10 +93,12 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
 
     /**
      * @param  Collection<int, CheckInEvent>  $events
-     * @return array{week_key: string, window_start: string, window_end: string, monitor_count: int, missed: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string}>, non_zero_exit: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string, exit_code: int|null}>}
+     * @param  list<array{monitor_id: int, monitor_name: string, command: string|null, reference_at: string|null, reference_type: string}>  $stillMissed
+     * @return array{week_key: string, window_start: string, window_end: string, monitor_count: int, missed: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string}>, non_zero_exit: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string, exit_code: int|null}>, still_missed: list<array{monitor_id: int, monitor_name: string, command: string|null, reference_at: string|null, reference_type: string}>}
      */
     private function payload(
         Collection $events,
+        array $stillMissed,
         string $weekKey,
         CarbonImmutable $windowStart,
         CarbonImmutable $windowEnd,
@@ -130,6 +134,56 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
             'monitor_count' => $monitorCount,
             'missed' => $missed,
             'non_zero_exit' => $nonZeroExit,
+            'still_missed' => $stillMissed,
         ];
+    }
+
+    /**
+     * @return list<array{monitor_id: int, monitor_name: string, command: string|null, reference_at: string|null, reference_type: string}>
+     */
+    private function stillMissed(CarbonImmutable $windowStart, CarbonImmutable $windowEnd): array
+    {
+        $stillMissed = [];
+
+        Monitor::query()
+            ->where('status', 'missed')
+            ->select(['id', 'name', 'command', 'last_check_in_at'])
+            ->orderBy('id')
+            ->chunkById(100, function ($monitors) use ($windowStart, $windowEnd, &$stillMissed): void {
+                foreach ($monitors as $monitor) {
+                    $missedEvent = $monitor->events()
+                        ->where('event_type', CheckInEvent::TYPE_MISSED)
+                        ->latest('occurred_at')
+                        ->latest('id')
+                        ->first();
+
+                    if ($missedEvent === null) {
+                        $stillMissed[] = [
+                            'monitor_id' => $monitor->id,
+                            'monitor_name' => $monitor->name,
+                            'command' => $monitor->command,
+                            'reference_at' => $monitor->last_check_in_at?->toISOString(),
+                            'reference_type' => 'last_check_in_at',
+                        ];
+
+                        continue;
+                    }
+
+                    if ($missedEvent->occurred_at->greaterThanOrEqualTo($windowStart)
+                        && $missedEvent->occurred_at->lessThan($windowEnd)) {
+                        continue;
+                    }
+
+                    $stillMissed[] = [
+                        'monitor_id' => $monitor->id,
+                        'monitor_name' => $missedEvent->monitor_name ?? $monitor->name,
+                        'command' => $missedEvent->command ?? $monitor->command,
+                        'reference_at' => $missedEvent->occurred_at->toISOString(),
+                        'reference_type' => 'missed_at',
+                    ];
+                }
+            });
+
+        return $stillMissed;
     }
 }

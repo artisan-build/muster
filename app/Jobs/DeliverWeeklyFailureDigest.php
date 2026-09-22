@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Mail\WeeklyFailureDigestMail;
 use App\Models\WeeklyDigestDelivery;
+use App\Services\CurrentWeeklyDigestRecipient;
 use ArtisanBuild\BuiltForCloud\Contracts\SystemAuthorityQueueEntry;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -13,6 +14,7 @@ use Illuminate\Queue\TimeoutExceededException;
 use Illuminate\Support\ConfigurationUrlParser;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 
@@ -31,13 +33,20 @@ final class DeliverWeeklyFailureDigest implements ShouldQueue, SystemAuthorityQu
         'smtp',
     ];
 
+    private const int MINIMUM_PROCESSING_LEASE_SECONDS = 120;
+
     public int $tries = 3;
 
     public int $timeout = 15;
 
     public bool $failOnTimeout = true;
 
-    public function __construct(public readonly int $deliveryId) {}
+    public readonly string $jobId;
+
+    public function __construct(public readonly int $deliveryId)
+    {
+        $this->jobId = (string) Str::uuid();
+    }
 
     /** @return list<int> */
     public function backoff(): array
@@ -45,19 +54,26 @@ final class DeliverWeeklyFailureDigest implements ShouldQueue, SystemAuthorityQu
         return [10, 60];
     }
 
-    public function handle(): void
+    public function handle(CurrentWeeklyDigestRecipient $recipients): void
     {
+        $staleBefore = now()->subSeconds($this->processingLeaseSeconds());
         $claimed = WeeklyDigestDelivery::query()
             ->whereKey($this->deliveryId)
-            ->whereIn('status', [
-                WeeklyDigestDelivery::STATUS_PENDING,
-                WeeklyDigestDelivery::STATUS_RETRYING,
-            ])
+            ->where(fn ($query) => $query
+                ->whereIn('status', [
+                    WeeklyDigestDelivery::STATUS_PENDING,
+                    WeeklyDigestDelivery::STATUS_RETRYING,
+                ])
+                ->orWhere(fn ($query) => $query
+                    ->where('status', WeeklyDigestDelivery::STATUS_PROCESSING)
+                    ->where('processing_claimed_at', '<=', $staleBefore)))
             ->update([
                 'status' => WeeklyDigestDelivery::STATUS_PROCESSING,
                 'attempt_count' => DB::raw('attempt_count + 1'),
                 'last_attempt_at' => now(),
                 'last_error_code' => null,
+                'processing_claim_id' => $this->jobId,
+                'processing_claimed_at' => now(),
             ]);
 
         if ($claimed !== 1) {
@@ -67,6 +83,21 @@ final class DeliverWeeklyFailureDigest implements ShouldQueue, SystemAuthorityQu
         $delivery = WeeklyDigestDelivery::query()->findOrFail($this->deliveryId);
 
         try {
+            $recipient = $recipients->forUser($delivery->user_id);
+
+            if ($recipient === null) {
+                $this->cancel($delivery, $this->jobId);
+
+                return;
+            }
+
+            $delivery->forceFill(['recipient' => $recipient])->save();
+            $payload = $delivery->payload;
+
+            if ($payload === null) {
+                throw new RuntimeException('The weekly failure digest payload is unavailable.');
+            }
+
             $mailer = config('mail.default');
 
             if (! is_string($mailer) || ! $this->mailerCanDeliver($mailer)) {
@@ -74,19 +105,29 @@ final class DeliverWeeklyFailureDigest implements ShouldQueue, SystemAuthorityQu
             }
 
             Mail::mailer($mailer)
-                ->to($delivery->recipient)
-                ->send(new WeeklyFailureDigestMail($delivery->recipient, $delivery->payload));
+                ->to($recipient)
+                ->send(new WeeklyFailureDigestMail($recipient, $payload));
 
-            $delivery->forceFill([
-                'status' => WeeklyDigestDelivery::STATUS_DELIVERED,
-                'delivered_at' => now(),
-                'last_error_code' => null,
-            ])->save();
+            WeeklyDigestDelivery::query()
+                ->whereKey($delivery->id)
+                ->where('processing_claim_id', $this->jobId)
+                ->update([
+                    'status' => WeeklyDigestDelivery::STATUS_DELIVERED,
+                    'delivered_at' => now(),
+                    'last_error_code' => null,
+                    'processing_claim_id' => null,
+                    'processing_claimed_at' => null,
+                ]);
         } catch (Throwable) {
-            $delivery->forceFill([
-                'status' => WeeklyDigestDelivery::STATUS_RETRYING,
-                'last_error_code' => 'transport_failed',
-            ])->save();
+            WeeklyDigestDelivery::query()
+                ->whereKey($delivery->id)
+                ->where('processing_claim_id', $this->jobId)
+                ->update([
+                    'status' => WeeklyDigestDelivery::STATUS_RETRYING,
+                    'last_error_code' => 'transport_failed',
+                    'processing_claim_id' => null,
+                    'processing_claimed_at' => null,
+                ]);
 
             throw new RuntimeException('Weekly failure digest delivery failed.');
         }
@@ -94,18 +135,52 @@ final class DeliverWeeklyFailureDigest implements ShouldQueue, SystemAuthorityQu
 
     public function failed(?Throwable $exception): void
     {
-        $delivery = WeeklyDigestDelivery::query()->find($this->deliveryId);
+        WeeklyDigestDelivery::query()
+            ->whereKey($this->deliveryId)
+            ->where(fn ($query) => $query
+                ->whereIn('status', [
+                    WeeklyDigestDelivery::STATUS_PENDING,
+                    WeeklyDigestDelivery::STATUS_RETRYING,
+                ])
+                ->orWhere(fn ($query) => $query
+                    ->where('status', WeeklyDigestDelivery::STATUS_PROCESSING)
+                    ->where('processing_claim_id', $this->jobId)))
+            ->update([
+                'status' => WeeklyDigestDelivery::STATUS_FAILED,
+                'last_error_code' => $exception instanceof TimeoutExceededException
+                    ? 'timeout'
+                    : 'attempts_exhausted',
+                'processing_claim_id' => null,
+                'processing_claimed_at' => null,
+            ]);
+    }
 
-        if ($delivery === null || $delivery->status === WeeklyDigestDelivery::STATUS_DELIVERED) {
-            return;
-        }
+    private function processingLeaseSeconds(): int
+    {
+        $connection = $this->connection ?? config('queue.default');
+        $retryAfter = is_string($connection)
+            ? config("queue.connections.{$connection}.retry_after")
+            : null;
 
-        $delivery->forceFill([
-            'status' => WeeklyDigestDelivery::STATUS_FAILED,
-            'last_error_code' => $exception instanceof TimeoutExceededException
-                ? 'timeout'
-                : 'attempts_exhausted',
-        ])->save();
+        return max(
+            self::MINIMUM_PROCESSING_LEASE_SECONDS,
+            is_numeric($retryAfter) ? (int) $retryAfter + $this->timeout : 0,
+        );
+    }
+
+    private function cancel(WeeklyDigestDelivery $delivery, string $claimId): void
+    {
+        WeeklyDigestDelivery::query()
+            ->whereKey($delivery->id)
+            ->where('processing_claim_id', $claimId)
+            ->update([
+                'status' => WeeklyDigestDelivery::STATUS_CANCELLED,
+                'recipient' => null,
+                'payload' => null,
+                'last_error_code' => 'recipient_ineligible',
+                'processing_claim_id' => null,
+                'processing_claimed_at' => null,
+            ]);
     }
 
     /** @param array<string, true> $visited */

@@ -8,7 +8,7 @@
         <p data-testid="weekly-failure-digest-monitor-count">Monitored commands: {{ $payload['monitor_count'] }}</p>
     </div>
 
-    @if ($payload['missed'] === [] && $payload['non_zero_exit'] === [])
+    @if ($payload['missed'] === [] && $payload['non_zero_exit'] === [] && $payload['still_missed'] === [])
         <section data-testid="weekly-failure-digest-all-clear">
             <h2>All clear</h2>
             <p>No missed or non-zero exit failures occurred across {{ $payload['monitor_count'] }} monitored command(s) this week.</p>
@@ -24,6 +24,23 @@
                     <p>Command: {{ $failure['command'] }}</p>
                 @endif
                 <p>Occurred at: {{ $failure['occurred_at'] }}</p>
+            </article>
+        @empty
+            <p>None.</p>
+        @endforelse
+    </section>
+
+    <section data-testid="weekly-failure-digest-still-missed">
+        <h2>Still missed</h2>
+        @forelse ($payload['still_missed'] as $failure)
+            <article data-testid="weekly-failure-digest-row">
+                <h3>{{ $failure['monitor_name'] }}</h3>
+                @if ($failure['command'] !== null)
+                    <p>Command: {{ $failure['command'] }}</p>
+                @endif
+                @if ($failure['reference_at'] !== null)
+                    <p>{{ $failure['reference_type'] === 'missed_at' ? 'Missed since' : 'Last check-in' }}: {{ $failure['reference_at'] }}</p>
+                @endif
             </article>
         @empty
             <p>None.</p>
@@ -46,7 +63,7 @@
         @endforelse
     </section>
 
-    @if ($payload['missed'] !== [] || $payload['non_zero_exit'] !== [])
+    @if ($payload['missed'] !== [] || $payload['non_zero_exit'] !== [] || $payload['still_missed'] !== [])
         <aside data-testid="weekly-failure-digest-release-note">
             <p>Here's what you just got: non-zero exits are now included in your weekly failure digest.</p>
         </aside>

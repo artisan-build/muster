@@ -506,7 +506,8 @@ it('retains a pending delivery event beyond the newest one hundred events until 
 
     expect($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_DELIVERED);
 
-    $monitor->recordActivity([CheckInEvent::TYPE_CHECK_IN], $occurredAt->addSeconds(102));
+    $this->travelTo($occurredAt->addWeeks(2));
+    $monitor->recordActivity([CheckInEvent::TYPE_CHECK_IN], now());
 
     expect(CheckInEvent::query()->find($eventId))->toBeNull()
         ->and(AlertDelivery::query()->find($delivery->id))->toBeNull()

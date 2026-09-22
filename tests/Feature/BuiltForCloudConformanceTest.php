@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Console\Commands\EvaluateMonitorLateness;
 use App\Console\Commands\GenerateWeeklyFailureDigest;
+use App\Console\Commands\PublishWeeklyFailureDigests;
 use App\Jobs\DeliverTransitionAlert;
 use App\Jobs\DeliverWeeklyFailureDigest;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleReKeyCommand;
@@ -98,6 +99,7 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
             OwnershipMintClaimCommand::class,
             OwnershipRemintOwnerTokenCommand::class,
             PruneCredentialAuthorizationsCommand::class,
+            PublishWeeklyFailureDigests::class,
             SigningRootProvisionCommand::class,
             SubjectOffboardCommand::class,
             WarnExpiringCredentialsCommand::class,

@@ -8,7 +8,7 @@ UTC window: {{ $payload['window_start'] }} to {{ $payload['window_end'] }} (end 
 [weekly-failure-digest-monitor-count]
 Monitored commands: {{ $payload['monitor_count'] }}
 
-@if ($payload['missed'] === [] && $payload['non_zero_exit'] === [])
+@if ($payload['missed'] === [] && $payload['non_zero_exit'] === [] && $payload['still_missed'] === [])
 [weekly-failure-digest-all-clear]
 All clear: No missed or non-zero exit failures occurred across {{ $payload['monitor_count'] }} monitored command(s) this week.
 
@@ -22,6 +22,22 @@ Monitor: {{ $failure['monitor_name'] }}
 Command: {{ $failure['command'] }}
 @endif
 Occurred at: {{ $failure['occurred_at'] }}
+
+@empty
+None.
+
+@endforelse
+[weekly-failure-digest-still-missed]
+Still missed
+@forelse ($payload['still_missed'] as $failure)
+[weekly-failure-digest-row]
+Monitor: {{ $failure['monitor_name'] }}
+@if ($failure['command'] !== null)
+Command: {{ $failure['command'] }}
+@endif
+@if ($failure['reference_at'] !== null)
+{{ $failure['reference_type'] === 'missed_at' ? 'Missed since' : 'Last check-in' }}: {{ $failure['reference_at'] }}
+@endif
 
 @empty
 None.
@@ -42,7 +58,7 @@ Occurred at: {{ $failure['occurred_at'] }}
 None.
 
 @endforelse
-@if ($payload['missed'] !== [] || $payload['non_zero_exit'] !== [])
+@if ($payload['missed'] !== [] || $payload['non_zero_exit'] !== [] || $payload['still_missed'] !== [])
 [weekly-failure-digest-release-note]
 Here's what you just got: non-zero exits are now included in your weekly failure digest.
 @endif
