@@ -23,17 +23,16 @@ The installer asks for the full schedule-event endpoint, normally
 values are non-empty.
 
 For Laravel Cloud or Forge, use Scalpels' connection flow so it writes the URL and credential directly
-to the target environment without returning the plaintext credential. For another host, an authorized
-operator can issue the credential on the customer's Muster deployment:
+to the target environment without returning the plaintext credential. For another host, use the
+customer's Built for Cloud device-authorization flow for the `muster.check-in` app purpose, approve it
+in the authenticated Muster deployment, and enter the returned token in `muster:install`'s hidden
+prompt. The schedule-event endpoint accepts that protocol-bound bearer; a generic credential minted by
+`bfc:credential:mint` is deliberately not interchangeable with it.
 
-```bash
-php artisan bfc:credential:mint installation '<source-installation-ref>' --kind=bearer --purpose=consumption --name='muster-check-in-<app-id>' --local
-```
-
-The `--local` flag is required. Put the revealed value directly into the source application's secret
-environment as `MUSTER_TOKEN`; never commit it or pass it through chat. `muster-client` also carries
-`artisan-build/bfc-client`, which adds the source installation's opaque `X-BfC-Client-Id` label to
-requests. That identity is not a credential.
+Put the revealed value directly into the source application's secret environment as `MUSTER_TOKEN`;
+never commit it or pass it through chat. `muster-client` also carries `artisan-build/bfc-client`, which
+adds the source installation's opaque `X-BfC-Client-Id` label to requests. That identity is not a
+credential.
 
 ## Behaviour
 
