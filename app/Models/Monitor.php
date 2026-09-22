@@ -145,10 +145,16 @@ final class Monitor extends Model
             ->orderByDesc('id')
             ->limit(100)
             ->get(['id']);
+        $weeklyFailureCutoff = CarbonImmutable::now('UTC')
+            ->startOfWeek(CarbonInterface::MONDAY)
+            ->subWeek();
 
         CheckInEvent::query()
             ->where('monitor_id', $this->id)
             ->whereNotIn('id', $retainedEvents->modelKeys())
+            ->where(fn ($query) => $query
+                ->whereNotIn('event_type', self::FAILURE_EVENT_TYPES)
+                ->orWhere('occurred_at', '<', $weeklyFailureCutoff))
             ->whereDoesntHave('alertDeliveries', fn ($query) => $query
                 ->whereIn('status', AlertDelivery::NONTERMINAL_STATUSES))
             ->delete();

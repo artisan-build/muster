@@ -3,7 +3,10 @@
 declare(strict_types=1);
 
 use App\Console\Commands\EvaluateMonitorLateness;
+use App\Console\Commands\GenerateWeeklyFailureDigest;
+use App\Console\Commands\PublishWeeklyFailureDigests;
 use App\Jobs\DeliverTransitionAlert;
+use App\Jobs\DeliverWeeklyFailureDigest;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleReKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleRetireKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\CreateAdminCommand;
@@ -89,17 +92,20 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
             CredentialRevokeCommand::class,
             CredentialRotateCommand::class,
             EvaluateMonitorLateness::class,
+            GenerateWeeklyFailureDigest::class,
             HmacRewrapCommand::class,
             InstallOperatorCredentialCommand::class,
             OutboxDrainCommand::class,
             OwnershipMintClaimCommand::class,
             OwnershipRemintOwnerTokenCommand::class,
             PruneCredentialAuthorizationsCommand::class,
+            PublishWeeklyFailureDigests::class,
             SigningRootProvisionCommand::class,
             SubjectOffboardCommand::class,
             WarnExpiringCredentialsCommand::class,
             DeliverOwnershipWebhook::class,
             DeliverTransitionAlert::class,
+            DeliverWeeklyFailureDigest::class,
             'Closure@package/src/SystemAuthoritySchedule.php:27',
         ]),
         'no_signing_path' => [],

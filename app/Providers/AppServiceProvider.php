@@ -4,6 +4,8 @@ namespace App\Providers;
 
 use App\BuiltForCloud\MusterCredentialDeclaration;
 use App\Console\Commands\EvaluateMonitorLateness;
+use App\Console\Commands\GenerateWeeklyFailureDigest;
+use App\Console\Commands\PublishWeeklyFailureDigests;
 use ArtisanBuild\BuiltForCloud\Contracts\CredentialDeclaration;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
@@ -20,7 +22,11 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(CredentialDeclaration::class, MusterCredentialDeclaration::class);
-        $this->commands([EvaluateMonitorLateness::class]);
+        $this->commands([
+            EvaluateMonitorLateness::class,
+            GenerateWeeklyFailureDigest::class,
+            PublishWeeklyFailureDigests::class,
+        ]);
     }
 
     /**
