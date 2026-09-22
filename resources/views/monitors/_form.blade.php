@@ -19,29 +19,41 @@
 
     <fieldset data-testid="monitor-email-alert-configuration">
         <legend>Email alerts</legend>
-        <input type="hidden" name="email_alerts_enabled" value="0">
-        <label>
-            <input type="checkbox" name="email_alerts_enabled" value="1" @checked(old('email_alerts_enabled', $monitor?->email_alerts_enabled ?? false))>
-            <span>Send missed and recovered alerts by email</span>
+        <label data-testid="monitor-email-alert-mode-missed">
+            <input type="checkbox" name="email_alert_modes[]" value="{{ \App\Enums\AlertMode::Missed->value }}" @checked(in_array(\App\Enums\AlertMode::Missed->value, array_map('intval', (array) old('email_alert_modes', $monitor?->email_alert_modes->values() ?? [])), true))>
+            <span>Missed and recovered</span>
+        </label>
+        <label data-testid="monitor-email-alert-mode-non-zero-exit">
+            <input type="checkbox" name="email_alert_modes[]" value="{{ \App\Enums\AlertMode::NonZeroExit->value }}" @checked(in_array(\App\Enums\AlertMode::NonZeroExit->value, array_map('intval', (array) old('email_alert_modes', $monitor?->email_alert_modes->values() ?? [])), true))>
+            <span>Non-zero exits</span>
         </label>
         <label>
             <span>Email destination</span>
-            <input type="email" name="email_alert_destination" value="{{ $monitor?->email_alert_destination }}" maxlength="255" autocomplete="email">
+            <input type="email" name="email_alert_destination" value="" maxlength="255" autocomplete="email">
             @error('email_alert_destination') <small class="field-error">{{ $message }}</small> @enderror
+            @if ($monitor?->email_alert_destination !== null)
+                <small data-testid="monitor-email-alert-destination-configured">Configured</small>
+            @endif
         </label>
     </fieldset>
 
     <fieldset data-testid="monitor-webhook-alert-configuration">
         <legend>Webhook alerts</legend>
-        <input type="hidden" name="webhook_alerts_enabled" value="0">
-        <label>
-            <input type="checkbox" name="webhook_alerts_enabled" value="1" @checked(old('webhook_alerts_enabled', $monitor?->webhook_alerts_enabled ?? false))>
-            <span>Send missed and recovered alerts by webhook</span>
+        <label data-testid="monitor-webhook-alert-mode-missed">
+            <input type="checkbox" name="webhook_alert_modes[]" value="{{ \App\Enums\AlertMode::Missed->value }}" @checked(in_array(\App\Enums\AlertMode::Missed->value, array_map('intval', (array) old('webhook_alert_modes', $monitor?->webhook_alert_modes->values() ?? [])), true))>
+            <span>Missed and recovered</span>
+        </label>
+        <label data-testid="monitor-webhook-alert-mode-non-zero-exit">
+            <input type="checkbox" name="webhook_alert_modes[]" value="{{ \App\Enums\AlertMode::NonZeroExit->value }}" @checked(in_array(\App\Enums\AlertMode::NonZeroExit->value, array_map('intval', (array) old('webhook_alert_modes', $monitor?->webhook_alert_modes->values() ?? [])), true))>
+            <span>Non-zero exits</span>
         </label>
         <label>
             <span>Webhook destination</span>
-            <input type="url" name="webhook_alert_destination" value="{{ $monitor?->webhook_alert_destination }}" maxlength="2048" autocomplete="off">
+            <input type="url" name="webhook_alert_destination" value="" maxlength="2048" autocomplete="off">
             @error('webhook_alert_destination') <small class="field-error">{{ $message }}</small> @enderror
+            @if ($monitor?->webhook_alert_destination !== null)
+                <small data-testid="monitor-webhook-alert-destination-configured">Configured</small>
+            @endif
         </label>
     </fieldset>
 </div>

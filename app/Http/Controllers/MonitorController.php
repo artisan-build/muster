@@ -26,7 +26,7 @@ final class MonitorController extends Controller
 
     public function store(UpsertMonitorRequest $request): RedirectResponse
     {
-        $monitor = CredentialPartition::local()->monitors()->create($request->validated());
+        $monitor = CredentialPartition::local()->monitors()->create($request->monitorAttributes());
 
         return to_route('monitors.show', $monitor);
     }
@@ -53,7 +53,7 @@ final class MonitorController extends Controller
 
     public function update(UpsertMonitorRequest $request, Monitor $monitor): RedirectResponse
     {
-        $monitor->update($request->validated());
+        $monitor->update($request->monitorAttributes());
 
         return to_route('monitors.show', $monitor);
     }

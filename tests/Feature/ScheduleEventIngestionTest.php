@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Enums\AlertMode;
+use App\Jobs\DeliverTransitionAlert;
 use App\Models\AlertDelivery;
 use App\Models\CheckInEvent;
 use App\Models\CredentialPartition;
@@ -15,6 +17,7 @@ use ArtisanBuild\BuiltForCloud\SubjectType;
 use ArtisanBuild\BuiltForCloud\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -111,6 +114,8 @@ it('auto-registers by command and updates schedule data without changing identit
         ->and($monitor->expression)->toBe('* * * * *')
         ->and($monitor->timezone)->toBe('UTC')
         ->and($monitor->is_enabled)->toBeTrue()
+        ->and($monitor->email_alert_modes->value)->toBe(0)
+        ->and($monitor->webhook_alert_modes->value)->toBe(0)
         ->and($monitor->status)->toBe('running')
         ->and($monitor->next_due_at?->toISOString())->toBe('2026-09-21T12:01:00.000000Z')
         ->and($monitor->events()->pluck('event_type')->all())->toBe([CheckInEvent::TYPE_STARTED])
@@ -146,6 +151,28 @@ it('auto-registers by command and updates schedule data without changing identit
         ->and($monitor->refresh()->getAttributes())->toBe($before)
         ->and($monitor->events()->count())->toBe($eventCount)
         ->and($monitor->executions()->count())->toBe($executionCount);
+});
+
+it('auto-registers forty enabled commands without subscribing or delivering alerts', function (): void {
+    Queue::fake();
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+
+    foreach (range(1, 40) as $sequence) {
+        $command = "php artisan onboarding:command-{$sequence} --test-created";
+
+        $this->withHeaders($headers)
+            ->postJson(route('schedule-events.store'), scheduleEventPayload($command))
+            ->assertOk();
+    }
+
+    expect(Monitor::query()->count())->toBe(40)
+        ->and(Monitor::query()->where('is_enabled', true)->count())->toBe(40)
+        ->and(DB::table('monitors')->sum('email_alert_modes'))->toBe(0)
+        ->and(DB::table('monitors')->sum('webhook_alert_modes'))->toBe(0)
+        ->and(AlertDelivery::query()->count())->toBe(0);
+
+    Queue::assertNothingPushed();
 });
 
 it('correlates overlapping executions and keeps the unfinished invocation visibly open', function (): void {
@@ -426,7 +453,7 @@ it('computes mutable expectations in the event timezone across DST and defaults 
         ->and($utcMonitor->executions()->pluck('timezone')->all())->toBe(['UTC', 'UTC']);
 });
 
-it('recovers exactly once on start while skips preserve missed and failed states', function (): void {
+it('does not recover on start and recovers exactly once on successful completion while skips preserve failures', function (): void {
     $this->travelTo('2026-09-21 10:00:00 UTC');
     $issued = issueScheduleEventBearer();
     $headers = scheduleEventHeaders($issued['secret']);
@@ -452,10 +479,9 @@ it('recovers exactly once on start while skips preserve missed and failed states
     $this->withHeaders($headers)->postJson(route('schedule-events.store'), $recoveryStart)->assertOk();
     $this->withHeaders($headers)->postJson(route('schedule-events.store'), $recoveryStart)->assertOk();
 
-    expect($monitor->refresh()->status)->toBe('running')
-        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_RECOVERED)->count())->toBe(1)
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_RECOVERED)->count())->toBe(0)
         ->and($monitor->events()->where('execution_id', $recoveryExecution)->pluck('event_type')->all())->toBe([
-            CheckInEvent::TYPE_RECOVERED,
             CheckInEvent::TYPE_STARTED,
         ]);
 
@@ -467,6 +493,14 @@ it('recovers exactly once on start while skips preserve missed and failed states
     ]);
     $this->withHeaders($headers)->postJson(route('schedule-events.store'), $recoveryFinish)->assertOk();
     $this->withHeaders($headers)->postJson(route('schedule-events.store'), $recoveryFinish)->assertOk();
+
+    expect($monitor->refresh()->status)->toBe('healthy')
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_RECOVERED)->count())->toBe(1)
+        ->and($monitor->events()->where('execution_id', $recoveryExecution)->pluck('event_type')->all())->toBe([
+            CheckInEvent::TYPE_STARTED,
+            CheckInEvent::TYPE_FINISHED,
+            CheckInEvent::TYPE_RECOVERED,
+        ]);
 
     $laterExecution = '67676767-6767-4676-8676-676767676767';
     $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
@@ -561,6 +595,471 @@ it('accepts two successful executions then records bounded non-zero history dist
         ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_MISSED)->count())->toBe(0)
         ->and($monitor->events()->latest('occurred_at')->orderByDesc('id')->first()?->event_type)
         ->toBe(CheckInEvent::TYPE_NON_ZERO_EXIT);
+});
+
+it('does not let an older success clear a newer failure but allows a later successful invocation to recover', function (): void {
+    Queue::fake();
+    $this->travelTo('2026-09-21 16:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan execution:ordered-summary --test-created';
+    $executionA = '10101010-1010-4010-8010-101010101010';
+    $executionB = '20202020-2020-4020-8020-202020202020';
+    $executionC = '30303030-3030-4030-8030-303030303030';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $executionA,
+    ]))->assertOk();
+    $monitor = Monitor::query()->sole();
+    $monitor->update([
+        'webhook_alert_modes' => AlertMode::NonZeroExit->value,
+        'webhook_alert_destination' => 'https://hooks.example.test/ordered-summary',
+    ]);
+
+    $this->travelTo('2026-09-21 16:01:00 UTC');
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $executionB,
+    ]))->assertOk();
+
+    $this->travelTo('2026-09-21 16:02:00 UTC');
+    $failure = scheduleEventPayload($command, [
+        'phase' => 'finished',
+        'exit_code' => 19,
+        'runtime' => 60.0,
+        'execution_id' => $executionB,
+    ]);
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), $failure)->assertOk();
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), $failure)->assertOk();
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->last_exit_code)->toBe(19)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_NON_ZERO_EXIT)->count())->toBe(1)
+        ->and(AlertDelivery::query()->count())->toBe(1);
+
+    Queue::assertPushed(DeliverTransitionAlert::class, 1);
+
+    $this->travelTo('2026-09-21 16:03:00 UTC');
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'finished',
+        'exit_code' => 0,
+        'runtime' => 180.0,
+        'execution_id' => $executionA,
+    ]))->assertOk();
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->last_exit_code)->toBe(19)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_NON_ZERO_EXIT)->count())->toBe(1);
+
+    $this->travelTo('2026-09-21 16:04:00 UTC');
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $executionC,
+    ]))->assertOk();
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->last_exit_code)->toBe(19);
+
+    $this->travelTo('2026-09-21 16:05:00 UTC');
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'finished',
+        'exit_code' => 0,
+        'runtime' => 60.0,
+        'execution_id' => $executionC,
+    ]))->assertOk();
+
+    expect($monitor->refresh()->status)->toBe('healthy')
+        ->and($monitor->last_exit_code)->toBe(0)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_NON_ZERO_EXIT)->count())->toBe(1)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_RECOVERED)->count())->toBe(1)
+        ->and(AlertDelivery::query()->count())->toBe(2);
+
+    Queue::assertPushed(DeliverTransitionAlert::class, 2);
+});
+
+it('marks a post-failure hung execution missed exactly once for missed-only subscribers', function (): void {
+    Queue::fake();
+    $this->travelTo('2026-09-21 17:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan execution:failed-then-hung --test-created';
+    $failedExecution = '41414141-4141-4141-8141-414141414141';
+    $hungExecution = '42424242-4242-4242-8242-424242424242';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $failedExecution,
+    ]))->assertOk();
+    $monitor = Monitor::query()->sole();
+    $monitor->update([
+        'email_alert_modes' => AlertMode::Missed->value,
+        'email_alert_destination' => 'missed-only@example.test',
+    ]);
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'finished',
+        'exit_code' => 7,
+        'runtime' => 1.0,
+        'execution_id' => $failedExecution,
+    ]))->assertOk();
+
+    $this->travelTo('2026-09-21 17:01:00 UTC');
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $hungExecution,
+    ]))->assertOk();
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->last_exit_code)->toBe(7);
+
+    $this->travelTo('2026-09-21 17:03:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 2 state transition(s) recorded.')
+        ->assertSuccessful();
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 0 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    expect($monitor->refresh()->status)->toBe('missed')
+        ->and($monitor->executions()->where('execution_id', $hungExecution)->sole()->status)
+        ->toBe(ScheduleExecution::STATUS_RUNNING)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_NON_ZERO_EXIT)->count())->toBe(1)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_LATE)->count())->toBe(1)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_MISSED)->count())->toBe(1)
+        ->and(AlertDelivery::query()->count())->toBe(1)
+        ->and(AlertDelivery::query()->sole()->event->event_type)->toBe(CheckInEvent::TYPE_MISSED);
+
+    Queue::assertPushed(DeliverTransitionAlert::class, 1);
+});
+
+it('does not page again when a missed execution later completes non-zero', function (): void {
+    Queue::fake();
+    $this->travelTo('2026-09-21 17:30:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan execution:missed-then-failed --test-created';
+    $executionId = '43434343-4343-4343-8343-434343434343';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $executionId,
+    ]))->assertOk();
+    $monitor = Monitor::query()->sole();
+    $monitor->update([
+        'webhook_alert_modes' => AlertMode::Missed->value | AlertMode::NonZeroExit->value,
+        'webhook_alert_destination' => 'https://hooks.example.test/missed-then-failed',
+    ]);
+
+    $this->travelTo('2026-09-21 17:32:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 2 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    expect($monitor->refresh()->status)->toBe('missed')
+        ->and(AlertDelivery::query()->count())->toBe(1)
+        ->and(AlertDelivery::query()->sole()->event->event_type)->toBe(CheckInEvent::TYPE_MISSED);
+    Queue::assertPushed(DeliverTransitionAlert::class, 1);
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'finished',
+        'exit_code' => 17,
+        'runtime' => 120.0,
+        'execution_id' => $executionId,
+    ]))->assertOk();
+
+    $nonZeroEvent = $monitor->events()->where('event_type', CheckInEvent::TYPE_NON_ZERO_EXIT)->sole();
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->executions()->sole()->status)->toBe(ScheduleExecution::STATUS_FAILED)
+        ->and($nonZeroEvent->exit_code)->toBe(17)
+        ->and($nonZeroEvent->alertDeliveries()->count())->toBe(0)
+        ->and(AlertDelivery::query()->count())->toBe(1);
+    Queue::assertPushed(DeliverTransitionAlert::class, 1);
+});
+
+it('pages only on failure incident entry and rearms after a successful recovery', function (): void {
+    Queue::fake();
+    $this->travelTo('2026-09-21 18:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan execution:failure-incidents --test-created';
+    $executionIds = [
+        '51515151-5151-4151-8151-515151515151',
+        '52525252-5252-4252-8252-525252525252',
+        '53535353-5353-4353-8353-535353535353',
+        '54545454-5454-4454-8454-545454545454',
+    ];
+    $start = function (string $executionId) use ($headers, $command): void {
+        $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+            'execution_id' => $executionId,
+        ]))->assertOk();
+    };
+    $finish = function (string $executionId, int $exitCode) use ($headers, $command): array {
+        $payload = scheduleEventPayload($command, [
+            'phase' => 'finished',
+            'exit_code' => $exitCode,
+            'runtime' => 1.0,
+            'execution_id' => $executionId,
+        ]);
+        $this->withHeaders($headers)->postJson(route('schedule-events.store'), $payload)->assertOk();
+
+        return $payload;
+    };
+
+    $start($executionIds[0]);
+    $monitor = Monitor::query()->sole();
+    $monitor->update([
+        'webhook_alert_modes' => AlertMode::NonZeroExit->value,
+        'webhook_alert_destination' => 'https://hooks.example.test/failure-incidents',
+    ]);
+    $firstFailure = $finish($executionIds[0], 11);
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), $firstFailure)->assertOk();
+
+    $this->travelTo('2026-09-21 18:01:00 UTC');
+    $start($executionIds[1]);
+    $finish($executionIds[1], 12);
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_NON_ZERO_EXIT)->count())->toBe(2)
+        ->and(AlertDelivery::query()->count())->toBe(1);
+    Queue::assertPushed(DeliverTransitionAlert::class, 1);
+
+    $this->travelTo('2026-09-21 18:02:00 UTC');
+    $start($executionIds[2]);
+    $finish($executionIds[2], 0);
+
+    expect($monitor->refresh()->status)->toBe('healthy')
+        ->and($monitor->last_exit_code)->toBe(0);
+
+    $this->travelTo('2026-09-21 18:03:00 UTC');
+    $start($executionIds[3]);
+    $finish($executionIds[3], 13);
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_NON_ZERO_EXIT)->count())->toBe(3)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_RECOVERED)->count())->toBe(1)
+        ->and(AlertDelivery::query()->count())->toBe(3)
+        ->and(AlertDelivery::query()->distinct()->count('check_in_event_id'))->toBe(3);
+    Queue::assertPushed(DeliverTransitionAlert::class, 3);
+});
+
+it('keeps one non-zero page when the evaluator wins the next-boundary race', function (): void {
+    Queue::fake();
+    $this->travelTo('2026-09-21 18:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan execution:boundary-race --test-created';
+    $executionA = '61616161-6161-4161-8161-616161616161';
+    $executionB = '62626262-6262-4262-8262-626262626262';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $executionA,
+    ]))->assertOk();
+    $monitor = Monitor::query()->sole();
+    $monitor->update([
+        'email_alert_modes' => AlertMode::NonZeroExit->value,
+        'email_alert_destination' => 'boundary-race@example.test',
+    ]);
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'finished',
+        'exit_code' => 11,
+        'runtime' => 1.0,
+        'execution_id' => $executionA,
+    ]))->assertOk();
+
+    $this->travelTo('2026-09-21 18:01:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 1 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    expect($monitor->refresh()->status)->toBe('late');
+
+    $this->travelTo('2026-09-21 18:01:01 UTC');
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $executionB,
+    ]))->assertOk();
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->last_exit_code)->toBe(11);
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'finished',
+        'exit_code' => 12,
+        'runtime' => 1.0,
+        'execution_id' => $executionB,
+    ]))->assertOk();
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_NON_ZERO_EXIT)->count())->toBe(2)
+        ->and(AlertDelivery::query()->count())->toBe(1);
+    Queue::assertPushed(DeliverTransitionAlert::class, 1);
+});
+
+it('restores failed summary when a skip follows a transient late boundary', function (): void {
+    Queue::fake();
+    $this->travelTo('2026-09-21 18:30:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan execution:late-skip --test-created';
+    $executionId = '63636363-6363-4363-8363-636363636363';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $executionId,
+    ]))->assertOk();
+    $monitor = Monitor::query()->sole();
+    $monitor->update([
+        'webhook_alert_modes' => AlertMode::NonZeroExit->value,
+        'webhook_alert_destination' => 'https://hooks.example.test/late-skip',
+    ]);
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'finished',
+        'exit_code' => 15,
+        'runtime' => 1.0,
+        'execution_id' => $executionId,
+    ]))->assertOk();
+
+    $this->travelTo('2026-09-21 18:31:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 1 state transition(s) recorded.')
+        ->assertSuccessful();
+    $this->travelTo('2026-09-21 18:31:01 UTC');
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'skipped',
+        'execution_id' => null,
+    ]))->assertOk();
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->last_exit_code)->toBe(15)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_NON_ZERO_EXIT)->sole()->exit_code)->toBe(15)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_LATE)->count())->toBe(1)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_SKIPPED)->count())->toBe(1)
+        ->and(AlertDelivery::query()->count())->toBe(1);
+    Queue::assertPushed(DeliverTransitionAlert::class, 1);
+});
+
+it('pages each channel only on its first matching failure in one mixed incident', function (): void {
+    Queue::fake();
+    $this->travelTo('2026-09-21 19:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan execution:mixed-channel-incident --test-created';
+    $failedExecution = '64646464-6464-4464-8464-646464646464';
+    $hungExecution = '65656565-6565-4565-8565-656565656565';
+
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $failedExecution,
+    ]))->assertOk();
+    $monitor = Monitor::query()->sole();
+    $monitor->update([
+        'email_alert_modes' => AlertMode::Missed->value | AlertMode::NonZeroExit->value,
+        'email_alert_destination' => 'both-modes@example.test',
+        'webhook_alert_modes' => AlertMode::Missed->value,
+        'webhook_alert_destination' => 'https://hooks.example.test/missed-only',
+    ]);
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'phase' => 'finished',
+        'exit_code' => 21,
+        'runtime' => 1.0,
+        'execution_id' => $failedExecution,
+    ]))->assertOk();
+
+    $this->travelTo('2026-09-21 19:01:00 UTC');
+    $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+        'execution_id' => $hungExecution,
+    ]))->assertOk();
+    $this->travelTo('2026-09-21 19:03:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 2 state transition(s) recorded.')
+        ->assertSuccessful();
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 0 state transition(s) recorded.')
+        ->assertSuccessful();
+
+    $deliveries = AlertDelivery::query()->with('event')->orderBy('id')->get();
+
+    expect($monitor->refresh()->status)->toBe('missed')
+        ->and($deliveries)->toHaveCount(2)
+        ->and($deliveries->pluck('channel')->all())->toBe([
+            AlertDelivery::CHANNEL_EMAIL,
+            AlertDelivery::CHANNEL_WEBHOOK,
+        ])
+        ->and($deliveries->map(fn (AlertDelivery $delivery): string => $delivery->event->event_type)->all())->toBe([
+            CheckInEvent::TYPE_NON_ZERO_EXIT,
+            CheckInEvent::TYPE_MISSED,
+        ]);
+    Queue::assertPushed(DeliverTransitionAlert::class, 2);
+});
+
+it('recovers a mixed incident on success and rearms only after that recovery', function (): void {
+    Queue::fake();
+    $this->travelTo('2026-09-21 20:00:00 UTC');
+    $issued = issueScheduleEventBearer();
+    $headers = scheduleEventHeaders($issued['secret']);
+    $command = 'php artisan execution:mixed-recovery --test-created';
+    $executionIds = [
+        '71717171-7171-4171-8171-717171717171',
+        '72727272-7272-4272-8272-727272727272',
+        '73737373-7373-4373-8373-737373737373',
+        '74747474-7474-4474-8474-747474747474',
+    ];
+    $start = function (string $executionId) use ($headers, $command): void {
+        $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+            'execution_id' => $executionId,
+        ]))->assertOk();
+    };
+    $finish = function (string $executionId, int $exitCode) use ($headers, $command): void {
+        $this->withHeaders($headers)->postJson(route('schedule-events.store'), scheduleEventPayload($command, [
+            'phase' => 'finished',
+            'exit_code' => $exitCode,
+            'runtime' => 1.0,
+            'execution_id' => $executionId,
+        ]))->assertOk();
+    };
+
+    $start($executionIds[0]);
+    $monitor = Monitor::query()->sole();
+    $monitor->update([
+        'email_alert_modes' => AlertMode::Missed->value | AlertMode::NonZeroExit->value,
+        'email_alert_destination' => 'mixed-recovery@example.test',
+    ]);
+
+    $this->travelTo('2026-09-21 20:02:00 UTC');
+    $this->artisan('monitors:evaluate')
+        ->expectsOutput('Evaluated monitors; 2 state transition(s) recorded.')
+        ->assertSuccessful();
+    $finish($executionIds[0], 31);
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_RECOVERED)->count())->toBe(0)
+        ->and(AlertDelivery::query()->count())->toBe(1);
+
+    $this->travelTo('2026-09-21 20:03:00 UTC');
+    $start($executionIds[1]);
+
+    expect($monitor->refresh()->status)->toBe('failed')
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_RECOVERED)->count())->toBe(0);
+
+    $monitor->update([
+        'webhook_alert_modes' => AlertMode::NonZeroExit->value,
+        'webhook_alert_destination' => 'https://hooks.example.test/unpaged-during-incident',
+    ]);
+    $finish($executionIds[1], 0);
+    $finish($executionIds[1], 0);
+
+    expect($monitor->refresh()->status)->toBe('healthy')
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_RECOVERED)->count())->toBe(1)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_RECOVERED)->sole()
+            ->alertDeliveries()->pluck('channel')->all())->toBe([AlertDelivery::CHANNEL_EMAIL])
+        ->and(AlertDelivery::query()->count())->toBe(2);
+
+    $this->travelTo('2026-09-21 20:04:00 UTC');
+    $start($executionIds[2]);
+    $finish($executionIds[2], 32);
+
+    expect(AlertDelivery::query()->count())->toBe(4)
+        ->and($monitor->events()->where('event_type', CheckInEvent::TYPE_NON_ZERO_EXIT)->count())->toBe(2);
+
+    $this->travelTo('2026-09-21 20:05:00 UTC');
+    $start($executionIds[3]);
+    $finish($executionIds[3], 0);
+
+    expect($monitor->events()->where('event_type', CheckInEvent::TYPE_RECOVERED)->count())->toBe(2)
+        ->and(AlertDelivery::query()->count())->toBe(6);
+    Queue::assertPushed(DeliverTransitionAlert::class, 6);
 });
 
 it('advances an existing skipped boundary without creating late missed or non-zero transitions', function (): void {
