@@ -667,6 +667,42 @@ it('reclaims only stale processing work and treats delivered replay as harmless'
         ->and($live->processing_claim_id)->toBe('42b0807d-1a36-4ca0-a918-f5b86c0ac809');
 });
 
+it('reclaims the same physical job at the default database retry boundary without stealing a live claim', function (): void {
+    config([
+        'mail.default' => 'smtp',
+        'queue.default' => 'database',
+    ]);
+    Mail::fake();
+    $claimedAt = now();
+    $retryAfter = config('queue.connections.database.retry_after');
+    $delivery = createWeeklyDigestDelivery('retry-boundary@example.test');
+    $job = new DeliverWeeklyFailureDigest($delivery->id);
+    $delivery->forceFill([
+        'status' => WeeklyDigestDelivery::STATUS_PROCESSING,
+        'processing_claim_id' => $job->jobId,
+        'processing_claimed_at' => $claimedAt,
+    ])->save();
+
+    expect($retryAfter)->toBe(90)
+        ->and($job->timeout)->toBe(15);
+
+    $this->travelTo($claimedAt->addSeconds(($job->timeout * 2) - 1));
+    runWeeklyDigestDelivery($job);
+
+    Mail::assertNothingSent();
+    expect($delivery->refresh()->status)->toBe(WeeklyDigestDelivery::STATUS_PROCESSING)
+        ->and($delivery->attempt_count)->toBe(0)
+        ->and($delivery->processing_claim_id)->toBe($job->jobId);
+
+    $this->travelTo($claimedAt->addSeconds($retryAfter));
+    runWeeklyDigestDelivery($job);
+
+    Mail::assertSent(WeeklyFailureDigestMail::class, 1);
+    expect($delivery->refresh()->status)->toBe(WeeklyDigestDelivery::STATUS_DELIVERED)
+        ->and($delivery->attempt_count)->toBe(1)
+        ->and($delivery->processing_claim_id)->toBeNull();
+});
+
 it('cancels and scrubs a delivery when its current recipient becomes ineligible', function (array $state): void {
     Queue::fake();
     config(['mail.default' => 'smtp']);

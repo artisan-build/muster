@@ -33,7 +33,9 @@ final class DeliverWeeklyFailureDigest implements ShouldQueue, SystemAuthorityQu
         'smtp',
     ];
 
-    private const int MINIMUM_PROCESSING_LEASE_SECONDS = 120;
+    private const int MINIMUM_PROCESSING_LEASE_SECONDS = 30;
+
+    private const int PROCESSING_LEASE_TIMEOUT_MULTIPLIER = 2;
 
     public int $tries = 3;
 
@@ -157,14 +159,11 @@ final class DeliverWeeklyFailureDigest implements ShouldQueue, SystemAuthorityQu
 
     private function processingLeaseSeconds(): int
     {
-        $connection = $this->connection ?? config('queue.default');
-        $retryAfter = is_string($connection)
-            ? config("queue.connections.{$connection}.retry_after")
-            : null;
-
+        // Queue visibility must exceed the job timeout, so the first valid redelivery
+        // can safely reclaim after this timeout-derived margin.
         return max(
             self::MINIMUM_PROCESSING_LEASE_SECONDS,
-            is_numeric($retryAfter) ? (int) $retryAfter + $this->timeout : 0,
+            $this->timeout * self::PROCESSING_LEASE_TIMEOUT_MULTIPLIER,
         );
     }
 
