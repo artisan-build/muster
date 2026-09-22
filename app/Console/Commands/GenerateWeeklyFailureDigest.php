@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Jobs\DeliverWeeklyFailureDigest;
 use App\Models\CheckInEvent;
+use App\Models\Monitor;
 use App\Models\WeeklyDigestDelivery;
 use ArtisanBuild\BuiltForCloud\Commands\SystemAuthorityCommand;
 use ArtisanBuild\BuiltForCloud\User;
@@ -25,6 +26,14 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
         $windowEnd = CarbonImmutable::now('UTC')->startOfWeek(CarbonInterface::MONDAY);
         $windowStart = $windowEnd->subWeek();
         $weekKey = $windowStart->format('o-\WW');
+        $monitorCount = Monitor::query()->count();
+
+        if ($monitorCount === 0) {
+            $this->info('No monitored commands exist; no weekly digest was queued.');
+
+            return self::SUCCESS;
+        }
+
         $events = CheckInEvent::query()
             ->whereIn('event_type', [
                 CheckInEvent::TYPE_MISSED,
@@ -43,13 +52,7 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
                 'exit_code',
             ]);
 
-        if ($events->isEmpty()) {
-            $this->info("No failures occurred during {$weekKey}; no digest was queued.");
-
-            return self::SUCCESS;
-        }
-
-        $payload = $this->payload($events, $weekKey, $windowStart, $windowEnd);
+        $payload = $this->payload($events, $weekKey, $windowStart, $windowEnd, $monitorCount);
         $queued = 0;
 
         User::query()
@@ -88,13 +91,14 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
 
     /**
      * @param  Collection<int, CheckInEvent>  $events
-     * @return array{week_key: string, window_start: string, window_end: string, missed: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string}>, non_zero_exit: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string, exit_code: int|null}>}
+     * @return array{week_key: string, window_start: string, window_end: string, monitor_count: int, missed: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string}>, non_zero_exit: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string, exit_code: int|null}>}
      */
     private function payload(
         Collection $events,
         string $weekKey,
         CarbonImmutable $windowStart,
         CarbonImmutable $windowEnd,
+        int $monitorCount,
     ): array {
         $missed = [];
         $nonZeroExit = [];
@@ -123,6 +127,7 @@ final class GenerateWeeklyFailureDigest extends SystemAuthorityCommand
             'week_key' => $weekKey,
             'window_start' => $windowStart->toISOString(),
             'window_end' => $windowEnd->toISOString(),
+            'monitor_count' => $monitorCount,
             'missed' => $missed,
             'non_zero_exit' => $nonZeroExit,
         ];

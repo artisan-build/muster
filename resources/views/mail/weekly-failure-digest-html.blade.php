@@ -5,7 +5,15 @@
         <p>Recipient: {{ $recipient }}</p>
         <p>Week: {{ $payload['week_key'] }}</p>
         <p>UTC window: {{ $payload['window_start'] }} to {{ $payload['window_end'] }} (end excluded)</p>
+        <p data-testid="weekly-failure-digest-monitor-count">Monitored commands: {{ $payload['monitor_count'] }}</p>
     </div>
+
+    @if ($payload['missed'] === [] && $payload['non_zero_exit'] === [])
+        <section data-testid="weekly-failure-digest-all-clear">
+            <h2>All clear</h2>
+            <p>No missed or non-zero exit failures occurred across {{ $payload['monitor_count'] }} monitored command(s) this week.</p>
+        </section>
+    @endif
 
     <section data-testid="weekly-failure-digest-missed">
         <h2>Missed</h2>
@@ -38,7 +46,16 @@
         @endforelse
     </section>
 
-    <aside data-testid="weekly-failure-digest-release-note">
-        <p>Here's what you just got: non-zero exits are now included in your weekly failure digest.</p>
+    @if ($payload['missed'] !== [] || $payload['non_zero_exit'] !== [])
+        <aside data-testid="weekly-failure-digest-release-note">
+            <p>Here's what you just got: non-zero exits are now included in your weekly failure digest.</p>
+        </aside>
+    @endif
+
+    <aside data-testid="weekly-failure-digest-urgent-alerts">
+        <p>
+            Need faster notice? Commands can be opted into urgent alerts.
+            <a data-testid="weekly-failure-digest-monitor-configuration" href="{{ route('monitors.index') }}">Configure monitor alerts</a>.
+        </p>
     </aside>
 </section>

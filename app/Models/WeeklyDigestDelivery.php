@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property CarbonImmutable $window_start
  * @property CarbonImmutable $window_end
  * @property string $recipient
- * @property array{week_key: string, window_start: string, window_end: string, missed: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string}>, non_zero_exit: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string, exit_code: int|null}>} $payload
+ * @property array{week_key: string, window_start: string, window_end: string, monitor_count: int, missed: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string}>, non_zero_exit: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string, exit_code: int|null}>} $payload
  * @property string $status
  * @property int $attempt_count
  * @property string|null $last_error_code

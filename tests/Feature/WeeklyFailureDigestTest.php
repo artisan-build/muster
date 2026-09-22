@@ -65,7 +65,7 @@ function createWeeklyDigestEvent(
 }
 
 /**
- * @return array{week_key: string, window_start: string, window_end: string, missed: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string}>, non_zero_exit: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string, exit_code: int|null}>}
+ * @return array{week_key: string, window_start: string, window_end: string, monitor_count: int, missed: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string}>, non_zero_exit: list<array{id: int, monitor_name: string, command: string|null, occurred_at: string, exit_code: int|null}>}
  */
 function weeklyDigestPayload(string $marker = 'Test Created Digest Payload'): array
 {
@@ -73,6 +73,7 @@ function weeklyDigestPayload(string $marker = 'Test Created Digest Payload'): ar
         'week_key' => '2026-W39',
         'window_start' => '2026-09-21T00:00:00.000000Z',
         'window_end' => '2026-09-28T00:00:00.000000Z',
+        'monitor_count' => 1,
         'missed' => [[
             'id' => 123,
             'monitor_name' => $marker,
@@ -174,7 +175,8 @@ it('snapshots all and only failures in the half-open UTC week for every active h
         ->and($deliveries->first()?->window_end->toISOString())->toBe('2026-09-28T00:00:00.000000Z');
 
     foreach ($deliveries as $delivery) {
-        expect(array_column($delivery->payload['missed'], 'id'))->toBe([$missed->id])
+        expect($delivery->payload['monitor_count'])->toBe(3)
+            ->and(array_column($delivery->payload['missed'], 'id'))->toBe([$missed->id])
             ->and(array_column($delivery->payload['non_zero_exit'], 'id'))->toBe([$nonZero->id])
             ->and($delivery->payload['non_zero_exit'][0]['monitor_name'])->toBe('Test Created Urgent Subscription Monitor')
             ->and($delivery->payload['non_zero_exit'][0]['exit_code'])->toBe(17);
@@ -183,20 +185,47 @@ it('snapshots all and only failures in the half-open UTC week for every active h
     Queue::assertPushed(DeliverWeeklyFailureDigest::class, 2);
 });
 
-it('does not queue a misleading digest when the completed week has no failures', function (): void {
+it('does not queue a digest when no monitored commands exist', function (): void {
     Queue::fake();
     $this->travelTo('2026-09-28 00:05:00 UTC');
-    createWeeklyDigestUser('Healthy Week');
+    createWeeklyDigestUser('No Monitors');
+
+    $this->artisan('digests:generate-weekly')
+        ->expectsOutput('No monitored commands exist; no weekly digest was queued.')
+        ->assertSuccessful();
+
+    expect(WeeklyDigestDelivery::query()->count())->toBe(0);
+    Queue::assertNothingPushed();
+});
+
+it('queues an all-clear digest for every active recipient when monitored commands had a clean week', function (): void {
+    Queue::fake();
+    $this->travelTo('2026-09-28 00:05:00 UTC');
+    $firstRecipient = createWeeklyDigestUser('Healthy Week First');
+    $secondRecipient = createWeeklyDigestUser('Healthy Week Second');
     $monitor = createWeeklyDigestMonitor('Test Created Healthy Week Monitor');
     createWeeklyDigestEvent($monitor, CheckInEvent::TYPE_LATE, '2026-09-24 12:00:00');
     createWeeklyDigestEvent($monitor, CheckInEvent::TYPE_FINISHED, '2026-09-24 12:01:00');
 
     $this->artisan('digests:generate-weekly')
-        ->expectsOutput('No failures occurred during 2026-W39; no digest was queued.')
+        ->expectsOutput('Queued 2 weekly failure digest delivery(s) for 2026-W39.')
+        ->assertSuccessful();
+    $this->artisan('digests:generate-weekly')
+        ->expectsOutput('Queued 0 weekly failure digest delivery(s) for 2026-W39.')
         ->assertSuccessful();
 
-    expect(WeeklyDigestDelivery::query()->count())->toBe(0);
-    Queue::assertNothingPushed();
+    $deliveries = WeeklyDigestDelivery::query()->orderBy('user_id')->get();
+
+    expect($deliveries)->toHaveCount(2)
+        ->and($deliveries->pluck('user_id')->all())->toBe([$firstRecipient->id, $secondRecipient->id]);
+
+    foreach ($deliveries as $delivery) {
+        expect($delivery->payload['monitor_count'])->toBe(1)
+            ->and($delivery->payload['missed'])->toBe([])
+            ->and($delivery->payload['non_zero_exit'])->toBe([]);
+    }
+
+    Queue::assertPushed(DeliverWeeklyFailureDigest::class, 2);
 });
 
 it('enforces one opaque encrypted delivery identity per account recipient and week', function (): void {
@@ -273,12 +302,19 @@ it('renders escaped HTML and text structures then marks real transport success e
             ->assertSeeInHtml('data-testid="weekly-failure-digest-missed"', false)
             ->assertSeeInHtml('data-testid="weekly-failure-digest-non-zero-exit"', false)
             ->assertSeeInHtml('data-testid="weekly-failure-digest-row"', false)
+            ->assertSeeInHtml('data-testid="weekly-failure-digest-monitor-count"', false)
+            ->assertSeeInHtml('Monitored commands: 1')
+            ->assertSeeInHtml('data-testid="weekly-failure-digest-urgent-alerts"', false)
+            ->assertSeeInHtml('data-testid="weekly-failure-digest-monitor-configuration"', false)
+            ->assertSeeInHtml('href="'.route('monitors.index').'"', false)
             ->assertSeeInHtml($recipient)
             ->assertSeeInHtml('Week: 2026-W39')
             ->assertSeeInHtml($maliciousName)
             ->assertSeeInHtml($maliciousCommand)
             ->assertDontSeeInHtml('<script>', false)
             ->assertDontSeeInHtml('<unsafe>', false)
+            ->assertDontSeeInHtml('urgent@example.test')
+            ->assertDontSeeInHtml('https://hooks.example.test/urgent')
             ->assertSeeInHtml('Test Created Non-Zero Monitor')
             ->assertSeeInHtml('2026-09-27T23:59:59.000000Z')
             ->assertSeeInHtml("Here's what you just got: non-zero exits are now included in your weekly failure digest.", false)
@@ -287,11 +323,18 @@ it('renders escaped HTML and text structures then marks real transport success e
             ->assertSeeInText('[weekly-failure-digest-missed]')
             ->assertSeeInText('[weekly-failure-digest-non-zero-exit]')
             ->assertSeeInText('[weekly-failure-digest-row]')
+            ->assertSeeInText('[weekly-failure-digest-monitor-count]')
+            ->assertSeeInText('Monitored commands: 1')
+            ->assertSeeInText('[weekly-failure-digest-urgent-alerts]')
+            ->assertSeeInText('[weekly-failure-digest-monitor-configuration]')
+            ->assertSeeInText('Configure monitor alerts: '.route('monitors.index'))
             ->assertSeeInText("Recipient: {$recipient}")
             ->assertSeeInText('Week: 2026-W39')
             ->assertSeeInText('&lt;script&gt;Test Created Digest Monitor&lt;/script&gt;')
             ->assertSeeInText('php artisan test-created:run --value=&quot;&lt;unsafe&gt;&quot;')
             ->assertSeeInText('Exit code: 42')
+            ->assertDontSeeInText('urgent@example.test')
+            ->assertDontSeeInText('https://hooks.example.test/urgent')
             ->assertSeeInText("Here's what you just got: non-zero exits are now included in your weekly failure digest.");
 
         return true;
@@ -304,6 +347,38 @@ it('renders escaped HTML and text structures then marks real transport success e
         ->and($delivery->refresh()->status)->toBe(WeeklyDigestDelivery::STATUS_DELIVERED)
         ->and($delivery->attempt_count)->toBe(1)
         ->and($delivery->delivered_at)->not->toBeNull();
+});
+
+it('renders an unambiguous all-clear with monitor count and urgent-alert configuration link', function (): void {
+    config(['mail.default' => 'smtp']);
+    Mail::fake();
+    $delivery = createWeeklyDigestDelivery('all-clear@example.test');
+    $payload = weeklyDigestPayload();
+    $payload['monitor_count'] = 4;
+    $payload['missed'] = [];
+    $payload['non_zero_exit'] = [];
+    $delivery->update(['payload' => $payload]);
+
+    (new DeliverWeeklyFailureDigest($delivery->id))->handle();
+
+    Mail::assertSent(WeeklyFailureDigestMail::class, function (WeeklyFailureDigestMail $mail): bool {
+        $mail->assertSeeInHtml('data-testid="weekly-failure-digest-all-clear"', false)
+            ->assertSeeInHtml('data-testid="weekly-failure-digest-monitor-count"', false)
+            ->assertSeeInHtml('No missed or non-zero exit failures occurred across 4 monitored command(s) this week.')
+            ->assertSeeInHtml('data-testid="weekly-failure-digest-urgent-alerts"', false)
+            ->assertSeeInHtml('href="'.route('monitors.index').'"', false)
+            ->assertDontSeeInHtml('weekly-failure-digest-release-note')
+            ->assertSeeInText('[weekly-failure-digest-all-clear]')
+            ->assertSeeInText('All clear: No missed or non-zero exit failures occurred across 4 monitored command(s) this week.')
+            ->assertSeeInText('[weekly-failure-digest-monitor-count]')
+            ->assertSeeInText('[weekly-failure-digest-urgent-alerts]')
+            ->assertSeeInText('Configure monitor alerts: '.route('monitors.index'))
+            ->assertDontSeeInText('[weekly-failure-digest-release-note]')
+            ->assertDontSeeInHtml('urgent@example.test')
+            ->assertDontSeeInText('urgent@example.test');
+
+        return true;
+    });
 });
 
 it('keeps transport failure retryable and exposes only sanitized terminal failure state', function (): void {
