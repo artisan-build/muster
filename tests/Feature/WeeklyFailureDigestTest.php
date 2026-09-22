@@ -236,7 +236,7 @@ it('enforces one opaque encrypted delivery identity per account recipient and we
     $delivery->update(['payload' => weeklyDigestPayload($marker)]);
     $raw = DB::table('weekly_digest_deliveries')->where('id', $delivery->id)->first();
 
-    expect(fn () => DB::table('weekly_digest_deliveries')->insert([
+    expect(fn () => DB::transaction(fn () => DB::table('weekly_digest_deliveries')->insert([
         'user_id' => $delivery->user_id,
         'week_key' => $delivery->week_key,
         'window_start' => $delivery->window_start,
@@ -245,7 +245,7 @@ it('enforces one opaque encrypted delivery identity per account recipient and we
         'payload' => (string) $raw?->payload,
         'created_at' => now(),
         'updated_at' => now(),
-    ]))->toThrow(UniqueConstraintViolationException::class);
+    ])))->toThrow(UniqueConstraintViolationException::class);
 
     $serialized = serialize(new DeliverWeeklyFailureDigest($delivery->id));
     $queue = Queue::connection('database');
