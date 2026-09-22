@@ -6,6 +6,7 @@ use ArtisanBuild\BuiltForCloud\CredentialPurpose;
 use ArtisanBuild\BuiltForCloud\Testing\ContractAssertions;
 use ArtisanBuild\BuiltForCloud\User;
 use Composer\InstalledVersions;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
 
@@ -67,6 +68,15 @@ it('merges package defaults and auto-discovers the released provider', function 
         ->and(app()->getLoadedProviders())->toHaveKey(BuiltForCloudServiceProvider::class, true)
         ->and(version_compare($version, '0.15.0', '>='))->toBeTrue()
         ->and(version_compare($version, '0.16.0', '<'))->toBeTrue();
+});
+
+it('exempts exactly the raw bearer ingestion URIs from request forgery protection', function (): void {
+    $neverVerify = new ReflectionProperty(PreventRequestForgery::class, 'neverVerify');
+
+    expect($neverVerify->getValue())->toBe([
+        'api/monitors/*/check-ins',
+        'api/schedule-events',
+    ]);
 });
 
 it('runs fresh package-owned migrations on sqlite', function (): void {
