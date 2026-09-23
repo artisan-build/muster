@@ -83,6 +83,15 @@ final class Monitor extends Model
         return hash('sha256', $command);
     }
 
+    public function resolveRouteBinding($value, $field = null): ?Model
+    {
+        if (filter_var($value, FILTER_VALIDATE_INT) === false) {
+            return null;
+        }
+
+        return parent::resolveRouteBinding($value, $field);
+    }
+
     /** @return BelongsTo<CredentialPartition, $this> */
     public function credentialPartition(): BelongsTo
     {
