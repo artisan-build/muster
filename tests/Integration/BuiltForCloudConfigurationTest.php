@@ -11,13 +11,20 @@ use Illuminate\Support\Facades\Schema;
 
 uses(ContractAssertions::class);
 
+it('uses live public URLs in the manifest', function (): void {
+    expect(config('built-for-cloud.manifest.icon'))
+        ->toBe('https://scalpels.app/img/products/transparent/muster.svg')
+        ->and(config('built-for-cloud.manifest.product_url'))
+        ->toBe('https://scalpels.app/');
+});
+
 it('matches the canonical Muster manifest and purpose contracts', function (): void {
     $this->assertBuiltForCloudManifestMatches([
         'name' => 'Muster',
         'slug' => 'muster',
         'description' => 'Self-hosted heartbeat and cron monitoring for scheduled tasks and background services.',
-        'icon' => 'https://scalpels.app/icons/muster.svg',
-        'product_url' => 'https://scalpels.app/products/muster',
+        'icon' => 'https://scalpels.app/img/products/transparent/muster.svg',
+        'product_url' => 'https://scalpels.app/',
     ]);
 
     expect(resolve(AppPurposeRegistry::class)->purpose('muster.check-in'))
@@ -49,8 +56,8 @@ it('merges package defaults and auto-discovers the released provider', function 
         'name' => 'Muster',
         'slug' => 'muster',
         'description' => 'Self-hosted heartbeat and cron monitoring for scheduled tasks and background services.',
-        'icon' => 'https://scalpels.app/icons/muster.svg',
-        'product_url' => 'https://scalpels.app/products/muster',
+        'icon' => 'https://scalpels.app/img/products/transparent/muster.svg',
+        'product_url' => 'https://scalpels.app/',
     ])->and(config('built-for-cloud.ui'))->toBe([
         'landing_page' => true,
         'member_management' => true,
