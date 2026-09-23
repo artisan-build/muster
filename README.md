@@ -59,7 +59,18 @@ deploys it to your own Laravel Cloud account.
   CSS is committed to the repository already.
 
 For the deployment section you also need a [Laravel Cloud](https://cloud.laravel.com) account and
-Laravel's `cloud` CLI.
+Laravel's `cloud` CLI:
+
+```bash
+composer global require laravel/cloud-cli
+cloud auth -n
+```
+
+`cloud auth` opens a browser to sign you in. On a machine with no browser, set `LARAVEL_CLOUD_TOKEN`
+in the environment instead, or save a token with `echo "$TOKEN" | cloud auth:token --add -n`.
+
+**What you should see:** a confirmation that you are authenticated. Every `cloud` command below takes
+`-n` so it never stops to ask a question you cannot see.
 
 ### 1. Get the code
 
@@ -85,6 +96,18 @@ runs the migrations against a local SQLite file at `database/database.sqlite`.
 **What you should see:** a list of migrations, each ending in `DONE`. The last ones are Muster's own
 (`create_monitors_table`, `create_check_in_events_table`, and so on).
 
+Then fix one value `.env.example` gets wrong for local use. It ships `APP_URL=http://localhost`,
+with no port, but you will be serving on port 8000. `APP_URL` is what Muster puts in the weekly
+digest's link, so leave it alone and that link points at the wrong place:
+
+```bash
+sed -i '' 's|^APP_URL=.*|APP_URL=http://localhost:8000|' .env   # macOS; drop the '' on Linux
+php artisan config:clear
+```
+
+**What you should see:** `php artisan tinker --execute="echo route('monitors.index');"` now prints
+`http://localhost:8000/monitors` rather than `http://localhost/monitors`.
+
 ### 3. Create your account
 
 Muster has no public sign-up. The first account is created from the command line:
@@ -106,7 +129,7 @@ refuses, unless you pass `--force`, which creates an Admin instead.
 ### 4. Start the three processes Muster needs
 
 Muster is three things running at once, so open **three terminals**. Running only the first gives
-you a web UI that records check-ins and never alerts on anything.
+you a web UI that can never notice a task that stopped reporting in.
 
 **Terminal 1 — the web server:**
 
@@ -122,9 +145,11 @@ This serves the app at <http://localhost:8000>. It stays in the foreground.
 php artisan schedule:work
 ```
 
-This is the one that does the actual monitoring. Every minute it runs `monitors:evaluate`, which
-marks overdue monitors `late` and then `missed`, and `digests:publish-weekly`. Without it Muster
-never raises an alert about anything.
+This is the one that notices absence. Every minute it runs `monitors:evaluate`, which marks overdue
+monitors `late` and then `missed`, and `digests:publish-weekly`. Without it Muster cannot detect a
+missing check-in and cannot generate a weekly digest. A run that *does* report in and fails — a
+non-zero exit sent to `/api/schedule-events` — still alerts without the scheduler, as long as a
+queue worker is running.
 
 **What you should see:** within a minute,
 `Running ['artisan' monitors:evaluate] .. DONE`, repeating every minute.
@@ -161,61 +186,94 @@ analysis, tests and a dependency audit in one go — run `composer ready`.
 ### 6. Connect your first application
 
 A monitor needs something to check in. The client package reports every scheduled command in a
-Laravel application without you touching a single command definition.
+Laravel application without you touching a single command definition. Do this against the **local**
+Muster from step 4, before you deploy anything — it is the fastest way to see Muster work.
 
-> **The client package is not published yet.** `artisan-build/muster-client` is built inside this
-> repository and will be released as its own package, but it is not on Packagist today. Until it is,
-> install it from your Muster checkout with a Composer **path repository** — a local directory
-> Composer treats as a package source.
+You need a second Laravel application. Any existing one will do; if you have none, make a throwaway:
 
-In the Laravel application you want monitored, using the absolute path to your Muster checkout:
+```bash
+composer create-project laravel/laravel ~/muster-demo
+cd ~/muster-demo
+```
+
+> **The client package is not published yet.** `artisan-build/muster-client` is built inside the
+> Muster repository and will be released as its own package, but it is not on Packagist today. Until
+> it is, install it with a Composer **path repository** — a local directory Composer treats as a
+> package source.
+
+Using the absolute path to your Muster checkout:
 
 ```bash
 composer config repositories.muster-client path /absolute/path/to/muster/packages/muster-client
 composer require artisan-build/muster-client:@dev
 ```
 
-Then connect it:
+Now connect it to the Muster you have running on port 8000:
 
 ```bash
-php artisan muster:install --url=https://your-muster.example/api/schedule-events
+php artisan muster:install --url=http://localhost:8000/api/schedule-events
 php artisan config:clear
 ```
 
-`muster:install` prints an authorization URL and opens it in your browser. Sign in to Muster, check
-that the page is asking for the `muster.check-in` permission, and approve it. That hands the
-application a **bearer token** — a secret string it sends in an `Authorization: Bearer …` header to
-prove who it is. The token is written to that application's `.env` as `MUSTER_TOKEN` and is never
-printed to your screen. The package does nothing at all unless both `MUSTER_URL` and `MUSTER_TOKEN`
-are set.
+`muster:install` prints an authorization URL and opens it in your browser. Sign in to Muster with
+the account from step 3, check that the page is asking for the `muster.check-in` permission, and
+approve it. That hands this application a **bearer token** — a secret string it sends in an
+`Authorization: Bearer …` header to prove who it is. The token is written to this application's
+`.env` as `MUSTER_TOKEN` and is never printed to your screen. The package does nothing at all unless
+both `MUSTER_URL` and `MUSTER_TOKEN` are set.
 
-**What you should see:** the first time that application's scheduler runs a command, a monitor for
-it appears in Muster's `/monitors` list, already enabled and `healthy`, named after the command, and
-carrying the command's real **cron expression** — the five-field schedule string such as
-`* * * * *` (minute, hour, day of month, month, day of week) that says when the task is meant to
-run. Muster derives the expected cadence from it, so you do not set one by hand.
+**What you should see:** `Muster connection settings updated.`
+
+The client reports *scheduled* commands, so give this application something to schedule. Add one line
+to its `routes/console.php`:
+
+```php
+Illuminate\Support\Facades\Schedule::command('inspire')->everyMinute();
+```
+
+Then run its scheduler once, by hand:
+
+```bash
+php artisan schedule:run
+```
+
+**What you should see:** `Running ['artisan' inspire] .. DONE` here, and then — in Muster at
+<http://localhost:8000/monitors> — a **new monitor that you did not create**. It is already enabled,
+its status is `healthy`, it is named after the command that ran, and it carries that command's real
+**cron expression**: the five-field schedule string, here `* * * * *` (minute, hour, day of month,
+month, day of week), that says when the task is meant to run. Muster derives the expected cadence
+from it, so you never set one by hand for a connected command.
+
+That is the whole product working: you registered nothing, and Muster now knows about the task and
+when to expect it again.
 
 ### 7. Deploy to Laravel Cloud
 
-Muster is built to be deployed to Laravel Cloud, one copy per team, into your own account. These
-commands use Laravel's `cloud` CLI. Flags change between CLI releases, so run `cloud <command> -h`
-rather than trusting a signature you copied.
+Muster is built to be deployed to Laravel Cloud, one copy per team, into your own account. The
+commands below were written against Laravel Cloud CLI **v0.6.0**. Its flags move between releases, so
+run `cloud <command> -h` before trusting any signature, including these.
 
 **7.1 — Create the application.**
 
 ```bash
-cloud ship
+cloud ship -n
 ```
 
 Walk the prompts: region, application name, repository, resources. Let it create and attach the
-**database** — that is the reliable path. Say **yes** to enabling the **scheduler**; Muster does not
-work without it.
+**database** — that is the reliable path. Say **yes** to enabling the **scheduler**; without it
+Muster cannot notice a missing check-in.
 
-> **Decline the offer to sync your local `.env`.** `cloud ship` asks whether to copy your `.env` up.
-> Say no. Your local file contains `DB_CONNECTION=sqlite`, `QUEUE_CONNECTION=database`,
-> `CACHE_STORE=database`, `SESSION_DRIVER=database` and `FILESYSTEM_DISK=local` — exactly the
-> variables Cloud is about to set for you, and copying them up breaks the resources you just
-> provisioned. See the rule below.
+Near the end `ship` prints your environment's URL and asks **"Do you want to deploy the
+application?"**. Answer **no** for now — you still have a queue to attach and variables to set, and
+you will deploy in 7.5.
+
+**Write down the URL it printed.** It looks like `https://<something>.laravel.cloud` and it is the
+address of your Muster. Everything below that says `<your-muster-url>` means that URL. If you want a
+custom domain instead, see 7.8.
+
+> **Never upload your local `.env`.** CLI v0.6.0 filters standard Laravel keys out of its
+> "add local environment variables" prompt, so a stock Muster checkout will not be offered any — but
+> the rule below is what matters whenever you set a variable by any route.
 
 **7.2 — Bind the repository.** `cloud ship` does not write the file that tells the CLI which
 application this checkout deploys to, so do it explicitly:
@@ -232,30 +290,59 @@ one. Use a Cloud **managed queue** — a queue Cloud runs and scales for you —
 hand-scaled worker instance:
 
 ```bash
-cloud managed-queue:create <env> --name muster --size <size> -n --json
+cloud managed-queue:create <env> --name=muster --size=<size> --json -n
+cloud managed-queue:set-default <instance-id> -n
 ```
 
-Run `cloud managed-queue:create -h` for the sizes your account offers, then make that queue the
-default with `cloud managed-queue:set-default` — check its arguments with `-h` first, because they
-vary between CLI versions. Because the queue is a Cloud-provisioned resource, Cloud sets
-`QUEUE_CONNECTION` itself — you do not.
+Run `cloud managed-queue:create -h` for the sizes your account offers. `set-default` takes the
+**instance id** the create call returns, not the queue's name. Because the queue is a
+Cloud-provisioned resource, Cloud sets `QUEUE_CONNECTION` itself — you do not.
 
 **7.4 — Set the application variables.** Only these. Nothing about a resource.
 
 ```bash
-cloud environment:variables --json -n --action=set --key=APP_ENV   --value=production
-cloud environment:variables --json -n --action=set --key=APP_DEBUG --value=false
-cloud environment:variables --json -n --action=set --key=APP_NAME  --value=Muster
-cloud environment:variables --json -n --action=set --key=APP_URL   --value=https://your-muster.example
+cloud environment:variables <env> --action=set --key=APP_ENV   --value=production   -n --force
+cloud environment:variables <env> --action=set --key=APP_DEBUG --value=false        -n --force
+cloud environment:variables <env> --action=set --key=APP_NAME  --value=Muster       -n --force
+cloud environment:variables <env> --action=set --key=APP_URL   --value=<your-muster-url> -n --force
 ```
 
-Add your `MAIL_*` values the same way. Let Cloud generate and keep `APP_KEY`.
+Non-secret mail settings go the same way — `MAIL_MAILER`, `MAIL_HOST`, `MAIL_PORT`,
+`MAIL_FROM_ADDRESS`. Remember Muster only sends through a delivery-capable transport, so `log` is
+not a usable production value.
+
+**Anything secret — `MAIL_PASSWORD`, a mail provider's API key — does not go in `--value=`.** That
+leaves the plaintext in your shell history and in the process list. Use a Cloud secret, which the
+CLI encrypts locally so the plaintext never reaches the API:
+
+```bash
+echo "$MAIL_PASSWORD" | cloud secret:create --name=MAIL_PASSWORD --json -n
+cloud environment-secret:attach <env> <secret-id> -n
+```
+
+`secret:create` returns the id; `environment-secret:attach` takes ids, not names. Let Cloud generate
+and keep `APP_KEY`.
 
 **7.5 — Deploy and migrate.**
 
 ```bash
 cloud deploy -n
+```
+
+`cloud deploy` **already waits** for the deployment and reports the result, so do not follow it with
+`cloud deploy:monitor`: the monitor only accepts a deployment that is still running, and against a
+finished one it polls for about five minutes and then fails with
+`No active deployment found after waiting.` If you want the two separately, start it detached and
+monitor immediately:
+
+```bash
+cloud deploy --no-wait -n
 cloud deploy:monitor -n
+```
+
+Then migrate:
+
+```bash
 cloud command:run <env> --cmd="php artisan migrate --force" -n --no-monitor
 ```
 
@@ -270,19 +357,57 @@ It prompts for the password on your machine, hashes it on your machine, and send
 the environment through `cloud command:run`. The plaintext password never travels and never appears
 in a command line.
 
-**7.7 — Check it actually works.** Do not assume; read the resolved configuration back:
+**7.7 — Check it actually works.** Do not assume. Four things have to be true, and the first two
+being true tells you nothing about the last two.
+
+*The app serves and the resources are attached:*
 
 ```bash
-curl -sI https://your-muster.example            # expect 200 and a valid certificate
-cloud tinker <env> --code="echo config('database.default');"
-cloud tinker <env> --code="echo config('queue.default');"
-cloud tinker <env> --code="echo App\Models\Monitor::count();"
+curl -sI <your-muster-url>                     # expect 200 and a valid certificate
+cloud tinker <env> --code="echo config('database.default');" -n
+cloud tinker <env> --code="echo config('queue.default');" -n
 ```
 
 The database value should name the engine Cloud attached, and the queue value should be Cloud's own
 managed-queue connection name — **not** `database` and not `sync`. If either looks like a value from
-your local `.env`, you set a variable you should not have; remove it and redeploy. Then sign in and
-confirm `/monitors` loads.
+your local `.env`, you set a variable you should not have; remove it and redeploy. Sign in at
+`<your-muster-url>/bfc/login` and confirm `/monitors` loads.
+
+*The scheduler is actually running.* This is the check people skip, and skipping it is how you
+discover months later that nothing was ever being watched. `monitors:evaluate` writes a line every
+time it runs, so look for it:
+
+```bash
+cloud tinker <env> --code="echo App\Models\Monitor::whereNotNull('next_due_at')->count();" -n
+```
+
+Then wait two minutes and run the same command after deliberately letting a monitor go overdue —
+its status should reach `late` and then `missed` without you running anything. If a monitor stays
+`healthy` past its due time, the scheduler is not enabled for the environment.
+
+*The queue actually drains.* A configured queue is not a consuming queue. Create a throwaway monitor
+in the UI with a short cadence, point its webhook alert at a request-bin style URL you control, let
+it go missed, and confirm the request arrives:
+
+```bash
+cloud tinker <env> --code="echo App\Models\AlertDelivery::latest('id')->value('status');" -n
+```
+
+**What you should see:** `delivered`. A value stuck at `pending` means nothing is consuming the
+queue; `retrying` or `failed` means the destination or the mail transport rejected it. Delete the
+throwaway monitor afterwards.
+
+**7.8 — Optional: a custom domain.** The environment URL from 7.1 works permanently. If you want
+your own hostname instead:
+
+```bash
+cloud domain:create <env> --name=muster.example.com --json -n
+cloud domain:verify <domain-id> -n
+```
+
+`domain:create` returns the DNS records to place at your registrar. `domain:verify` only succeeds
+once those records have propagated. After it verifies, update `APP_URL` (7.4) to the new hostname
+and redeploy, or the weekly digest will keep linking to the old one.
 
 > ### The one rule that will bite you
 >
@@ -392,7 +517,7 @@ putting it on a command line, where it would land in your shell history:
 ```bash
 MUSTER_TOKEN=$(grep '^MUSTER_TOKEN=' /path/to/your-app/.env | cut -d= -f2-)
 
-curl -sS -X POST https://your-muster.example/api/monitors/1/check-ins \
+curl -sS -X POST http://localhost:8000/api/monitors/1/check-ins \
   -H "Authorization: Bearer $MUSTER_TOKEN"
 ```
 
@@ -457,8 +582,9 @@ no, and run it again with `--local`. The single exception is step 7.6, where rea
 point.
 
 **A deployed resource behaves as though it is not attached.** Check whether you set an environment
-variable for it — including by letting `cloud ship` sync your local `.env`. Remove the variable and
-redeploy.
+variable for it, by any route — `cloud environment:variables`, a secret, or accepting an offer to
+upload a local variable. Remove it and redeploy. Read the resolved value back with
+`cloud tinker` (step 7.7) rather than trusting the dashboard.
 
 ## License
 
