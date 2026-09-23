@@ -71,9 +71,7 @@ it('merges package defaults and auto-discovers the released provider', function 
 });
 
 it('exempts exactly the raw bearer ingestion URIs from request forgery protection', function (): void {
-    $neverVerify = new ReflectionProperty(PreventRequestForgery::class, 'neverVerify');
-
-    expect($neverVerify->getValue())->toBe([
+    expect(resolve(PreventRequestForgery::class)->getExcludedPaths())->toBe([
         'api/monitors/*/check-ins',
         'api/schedule-events',
     ]);
