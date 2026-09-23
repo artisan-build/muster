@@ -5,6 +5,8 @@ declare(strict_types=1);
 use App\Models\Monitor;
 use ArtisanBuild\BuiltForCloud\StandaloneAccess;
 use ArtisanBuild\BuiltForCloud\User;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 
 function signInToMuster(): User
 {
@@ -64,6 +66,35 @@ it('refuses unauthenticated bound routes before revealing monitor existence', fu
 })->with([
     'show' => 'monitors.show',
     'edit' => 'monitors.edit',
+]);
+
+it('rejects invalid monitor route ids before querying monitors', function (string $monitorId): void {
+    signInToMuster();
+    $monitorQueries = [];
+
+    DB::listen(function (QueryExecuted $query) use (&$monitorQueries): void {
+        if (str_contains($query->sql, 'monitors')) {
+            $monitorQueries[] = $query->sql;
+        }
+    });
+
+    $requests = [
+        fn () => $this->get(route('monitors.show', $monitorId)),
+        fn () => $this->get(route('monitors.edit', $monitorId)),
+        fn () => $this->put(route('monitors.update', $monitorId)),
+        fn () => $this->patch(route('monitors.disable', $monitorId)),
+        fn () => $this->patch(route('monitors.enable', $monitorId)),
+    ];
+
+    foreach ($requests as $request) {
+        $request()->assertNotFound();
+    }
+
+    expect($monitorQueries)->toBe([]);
+})->with([
+    'non-numeric' => 'not-a-monitor',
+    'decimal' => '1.5',
+    'bigint overflow' => '99999999999999999999',
 ]);
 
 it('creates, displays, edits, disables, and enables a monitor', function (): void {
