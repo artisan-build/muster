@@ -12,13 +12,20 @@ use Illuminate\Support\Facades\Schema;
 
 uses(ContractAssertions::class);
 
+it('uses live public URLs in the manifest', function (): void {
+    expect(config('built-for-cloud.manifest.icon'))
+        ->toBe('https://scalpels.app/img/products/transparent/muster.svg')
+        ->and(config('built-for-cloud.manifest.product_url'))
+        ->toBe('https://scalpels.app/');
+});
+
 it('matches the canonical Muster manifest and purpose contracts', function (): void {
     $this->assertBuiltForCloudManifestMatches([
         'name' => 'Muster',
         'slug' => 'muster',
         'description' => 'Self-hosted heartbeat and cron monitoring for scheduled tasks and background services.',
-        'icon' => 'https://scalpels.app/icons/muster.svg',
-        'product_url' => 'https://scalpels.app/products/muster',
+        'icon' => 'https://scalpels.app/img/products/transparent/muster.svg',
+        'product_url' => 'https://scalpels.app/',
     ]);
 
     expect(resolve(AppPurposeRegistry::class)->purpose('muster.check-in'))
@@ -41,7 +48,7 @@ it('merges package defaults and auto-discovers the released provider', function 
     $constraint = data_get($composer, 'require.artisan-build/built-for-cloud');
     $version = InstalledVersions::getVersion('artisan-build/built-for-cloud');
 
-    expect($constraint)->toBe('^0.15')
+    expect($constraint)->toBe('^0.17')
         ->and($version)->toBeString();
     assert(is_string($constraint));
     assert(is_string($version));
@@ -50,8 +57,8 @@ it('merges package defaults and auto-discovers the released provider', function 
         'name' => 'Muster',
         'slug' => 'muster',
         'description' => 'Self-hosted heartbeat and cron monitoring for scheduled tasks and background services.',
-        'icon' => 'https://scalpels.app/icons/muster.svg',
-        'product_url' => 'https://scalpels.app/products/muster',
+        'icon' => 'https://scalpels.app/img/products/transparent/muster.svg',
+        'product_url' => 'https://scalpels.app/',
     ])->and(config('built-for-cloud.ui'))->toBe([
         'landing_page' => true,
         'member_management' => true,
@@ -66,8 +73,8 @@ it('merges package defaults and auto-discovers the released provider', function 
         ->and(config('auth.defaults.guard'))->toBe('web')
         ->and(config('auth.providers.users.model'))->toBe(User::class)
         ->and(app()->getLoadedProviders())->toHaveKey(BuiltForCloudServiceProvider::class, true)
-        ->and(version_compare($version, '0.15.0', '>='))->toBeTrue()
-        ->and(version_compare($version, '0.16.0', '<'))->toBeTrue();
+        ->and(version_compare($version, '0.17.0', '>='))->toBeTrue()
+        ->and(version_compare($version, '0.18.0', '<'))->toBeTrue();
 });
 
 it('exempts exactly the raw bearer ingestion URIs from request forgery protection', function (): void {

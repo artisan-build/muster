@@ -92,6 +92,6 @@ Fleet bindings come from `~/Herd/brain/agents.json`, resolved at spawn time via
 ## Stack Notes
 
 - Laravel 13 on `laravel-nodeless`: no Node, no npm, no Vite, no frontend build step. Do not add one.
-- `artisan-build/built-for-cloud` is pinned at `^0.15`; the package moves fast, and raising the floor
+- `artisan-build/built-for-cloud` is pinned at `^0.17`; the package moves fast, and raising the floor
   is preferred over shimming around it.
 - The missed/recovered state machine is the part most likely to carry a test that cannot fail: a monitor that is never marked missed still passes a naive suite. Drive a full late-missed-recovered cycle, and drive a successful check-in TWICE - a repeated identical success is a known trap across this fleet.

@@ -7,8 +7,8 @@ return [
         'name' => 'Muster',
         'slug' => 'muster',
         'description' => 'Self-hosted heartbeat and cron monitoring for scheduled tasks and background services.',
-        'icon' => 'https://scalpels.app/icons/muster.svg',
-        'product_url' => 'https://scalpels.app/products/muster',
+        'icon' => 'https://scalpels.app/img/products/transparent/muster.svg',
+        'product_url' => 'https://scalpels.app/',
     ],
     'credentials' => [
         'guard' => 'bfc',
