@@ -106,10 +106,16 @@ final class MonitorTokenController extends Controller
         string $monitorId,
         bool $lock = false,
     ): ?Monitor {
+        $id = filter_var($monitorId, FILTER_VALIDATE_INT);
+
+        if ($id === false) {
+            return null;
+        }
+
         $query = Monitor::query()
             ->select('monitors.*')
             ->join('credential_partitions as partition', 'partition.id', '=', 'monitors.credential_partition_id')
-            ->where('monitors.id', $monitorId)
+            ->where('monitors.id', $id)
             ->where('monitors.is_enabled', true)
             ->where('partition.subject_type', $credential->scope->subject->type->value)
             ->where('partition.subject_ref', $credential->scope->subject->ref);

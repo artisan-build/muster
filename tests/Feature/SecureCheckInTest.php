@@ -292,6 +292,42 @@ it('refuses unknown and disabled monitors without mutation or disclosure', funct
         ->and(CheckInEvent::query()->count())->toBe(0);
 });
 
+it('issues no monitor query for a malformed identifier behind a valid bearer', function (): void {
+    $issued = issueMusterBearer('muster.check-in');
+    $monitorQueries = 0;
+
+    DB::listen(function (QueryExecuted $query) use (&$monitorQueries): void {
+        if (str_contains($query->sql, 'from "monitors"')) {
+            $monitorQueries++;
+        }
+    });
+
+    $post = fn (string $monitorId) => $this->withHeaders([
+        'Authorization' => 'Bearer '.$issued['secret'],
+        'Sec-Fetch-Site' => 'cross-site',
+    ])->postJson(route('monitor-check-ins.store', $monitorId));
+
+    $post('not-a-monitor')->assertUnauthorized();
+    $post('99999999999999999999')->assertUnauthorized();
+
+    expect($monitorQueries)->toBe(0);
+});
+
+it('keeps browser request forgery protection everywhere but the raw bearer ingestion URIs', function (): void {
+    $this->app['env'] = 'production';
+
+    $this->post(route('monitors.store'), [
+        'name' => 'Test Created Csrf Probe',
+        'cadence_seconds' => 600,
+        'grace_seconds' => 90,
+    ])->assertStatus(419);
+
+    $this->patch(route('monitors.disable', 1))->assertStatus(419);
+
+    $this->postJson(route('monitor-check-ins.store', 1))->assertUnauthorized();
+    $this->postJson(route('schedule-events.store'))->assertUnauthorized();
+});
+
 it('isolates check-ins and history between credential subject partitions', function (): void {
     $teamAMonitor = createTestMonitor(['name' => 'Test Created Team A Monitor']);
     $teamB = createTestPartition('test-created-team-b');
