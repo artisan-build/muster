@@ -47,7 +47,7 @@ it('merges package defaults and auto-discovers the released provider', function 
     $constraint = data_get($composer, 'require.artisan-build/built-for-cloud');
     $version = InstalledVersions::getVersion('artisan-build/built-for-cloud');
 
-    expect($constraint)->toBe('^0.15')
+    expect($constraint)->toBe('^0.17')
         ->and($version)->toBeString();
     assert(is_string($constraint));
     assert(is_string($version));
@@ -72,8 +72,8 @@ it('merges package defaults and auto-discovers the released provider', function 
         ->and(config('auth.defaults.guard'))->toBe('web')
         ->and(config('auth.providers.users.model'))->toBe(User::class)
         ->and(app()->getLoadedProviders())->toHaveKey(BuiltForCloudServiceProvider::class, true)
-        ->and(version_compare($version, '0.15.0', '>='))->toBeTrue()
-        ->and(version_compare($version, '0.16.0', '<'))->toBeTrue();
+        ->and(version_compare($version, '0.17.0', '>='))->toBeTrue()
+        ->and(version_compare($version, '0.18.0', '<'))->toBeTrue();
 });
 
 it('runs fresh package-owned migrations on sqlite', function (): void {
