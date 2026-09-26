@@ -15,6 +15,7 @@ use ArtisanBuild\BuiltForCloud\Commands\CredentialListCommand;
 use ArtisanBuild\BuiltForCloud\Commands\CredentialMintCommand;
 use ArtisanBuild\BuiltForCloud\Commands\CredentialRevokeCommand;
 use ArtisanBuild\BuiltForCloud\Commands\CredentialRotateCommand;
+use ArtisanBuild\BuiltForCloud\Commands\FreshCommand;
 use ArtisanBuild\BuiltForCloud\Commands\HmacRewrapCommand;
 use ArtisanBuild\BuiltForCloud\Commands\InstallOperatorCredentialCommand;
 use ArtisanBuild\BuiltForCloud\Commands\OutboxDrainCommand;
@@ -93,7 +94,7 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
             CredentialMintCommand::class,
             CredentialRevokeCommand::class,
             CredentialRotateCommand::class,
-            'ArtisanBuild\BuiltForCloud\Commands\FreshCommand',
+            FreshCommand::class,
             EvaluateMonitorLateness::class,
             GenerateWeeklyFailureDigest::class,
             HmacRewrapCommand::class,
