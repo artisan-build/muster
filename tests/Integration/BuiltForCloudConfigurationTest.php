@@ -74,7 +74,7 @@ it('merges package defaults and auto-discovers the released provider', function 
         ->and(config('auth.providers.users.model'))->toBe(User::class)
         ->and(app()->getLoadedProviders())->toHaveKey(BuiltForCloudServiceProvider::class, true)
         ->and(version_compare($version, '0.17.0', '>='))->toBeTrue()
-        ->and(version_compare($version, '0.18.0', '<'))->toBeTrue();
+        ->and(version_compare($version, '0.19.0', '<'))->toBeTrue();
 });
 
 it('exempts exactly the raw bearer ingestion URIs from request forgery protection', function (): void {
