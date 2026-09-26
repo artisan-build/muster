@@ -48,7 +48,7 @@ it('merges package defaults and auto-discovers the released provider', function 
     $constraint = data_get($composer, 'require.artisan-build/built-for-cloud');
     $version = InstalledVersions::getVersion('artisan-build/built-for-cloud');
 
-    expect($constraint)->toBe('^0.17')
+    expect($constraint)->toBe('^0.18')
         ->and($version)->toBeString();
     assert(is_string($constraint));
     assert(is_string($version));
