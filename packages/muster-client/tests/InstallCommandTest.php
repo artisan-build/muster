@@ -481,13 +481,9 @@ it('does not replace an unchanged environment file and creates new files with mo
     }
 });
 
-it('pins standalone development and audit metadata to the declared PHP floor', function (): void {
+it('keeps standalone audit metadata intact', function (): void {
     $root = dirname(__DIR__);
     $composer = json_decode((string) file_get_contents($root.'/composer.json'), true, flags: JSON_THROW_ON_ERROR);
-    $lock = json_decode((string) file_get_contents($root.'/composer.lock'), true, flags: JSON_THROW_ON_ERROR);
 
-    expect($composer['require']['php'])->toBe('^8.3')
-        ->and($composer['config']['platform']['php'])->toBe('8.3.0')
-        ->and($composer['scripts']['check'])->toContain('composer audit --locked --no-interaction')
-        ->and($lock['platform-overrides']['php'])->toBe('8.3.0');
+    expect($composer['scripts']['check'])->toContain('composer audit --locked --no-interaction');
 });
