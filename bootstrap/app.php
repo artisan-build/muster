@@ -1,7 +1,6 @@
 <?php
 
 use App\Console\Commands\ConfigureBuiltForCloud;
-use App\Console\Commands\Fresh;
 use App\Console\Commands\InstallFluxPro;
 use App\Console\Commands\OptimizeTailwind;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUserIsAuthenticated;
@@ -18,7 +17,6 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withCommands([
         ConfigureBuiltForCloud::class,
-        Fresh::class,
         InstallFluxPro::class,
         OptimizeTailwind::class,
     ])
