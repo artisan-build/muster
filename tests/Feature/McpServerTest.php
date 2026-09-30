@@ -171,7 +171,7 @@ it('conforms and exposes the exact closed read tool set', function (): void {
 
     foreach ($expected as $toolClass) {
         $reflection = new ReflectionClass($toolClass);
-        $tool = app($toolClass);
+        $tool = resolve($toolClass);
         $serialized = $tool->toArray();
 
         expect($reflection->getTraitNames())
