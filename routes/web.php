@@ -5,7 +5,12 @@ declare(strict_types=1);
 use App\Http\Controllers\MonitorController;
 use App\Http\Controllers\MonitorTokenController;
 use App\Http\Controllers\ScheduleEventController;
+use App\Mcp\MusterMcpServer;
 use Illuminate\Support\Facades\Route;
+use Laravel\Mcp\Facades\Mcp;
+
+Mcp::web('/mcp', MusterMcpServer::class)
+    ->middleware('bfc.mcp:product,read');
 
 Route::post('api/monitors/{monitorId}/check-ins', [MonitorTokenController::class, 'checkIn'])
     ->name('monitor-check-ins.store');
