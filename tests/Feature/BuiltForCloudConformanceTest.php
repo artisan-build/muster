@@ -7,6 +7,9 @@ use App\Console\Commands\GenerateWeeklyFailureDigest;
 use App\Console\Commands\PublishWeeklyFailureDigests;
 use App\Jobs\DeliverTransitionAlert;
 use App\Jobs\DeliverWeeklyFailureDigest;
+use App\Mcp\MusterMcpServer;
+use App\Mcp\Tools\MonitorHistoryTool;
+use App\Mcp\Tools\UnhealthyMonitorsTool;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleReKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleRetireKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\CreateAdminCommand;
@@ -125,7 +128,10 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
             'ArtisanBuild\BuiltForCloud\Mcp\TwoPhaseConfirmationStore|built-for-cloud.manifest.slug|1',
             'ArtisanBuild\BuiltForCloud\UiCredentialPurposes|built-for-cloud.ui.credential_purposes|1',
         ]),
-        'mcp_delegated' => [],
+        'mcp_delegated' => $sorted([
+            MonitorHistoryTool::class,
+            UnhealthyMonitorsTool::class,
+        ]),
     ];
 
     $report = (new FleetConformance($this))->assert(new ConsumerConformance(
@@ -135,9 +141,9 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
         sourceRoots: $sourceRoots,
         providerFiles: $providerFiles,
         runtimeAssertions: ['auth_schema', 'credential_listing', 'meta', 'transport_parity'],
-        capabilities: ['credentials', 'tokens'],
+        capabilities: ['credentials', 'mcp-delegated', 'mcp-effect-scoped', 'mcp-serve', 'tokens'],
         purposeMappings: $purposeMappings,
-        mcpServer: null,
+        mcpServer: MusterMcpServer::class,
         expected: $expected,
     ));
 

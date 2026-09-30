@@ -21,6 +21,11 @@ class AppServiceProvider extends ServiceProvider
     #[\Override]
     public function register(): void
     {
+        config()->set([
+            'built-for-cloud.mcp.path' => '/mcp',
+            'built-for-cloud.mcp.delegated' => true,
+        ]);
+
         $this->app->bind(CredentialDeclaration::class, MusterCredentialDeclaration::class);
         $this->commands([
             EvaluateMonitorLateness::class,
