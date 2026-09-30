@@ -37,6 +37,10 @@ use Composer\InstalledVersions;
 
 uses(ContractAssertions::class);
 
+it('passes the reusable MCP product-admission contract', function (): void {
+    $this->assertBuiltForCloudMcpProductAdmission();
+});
+
 it('passes the version 1 reference-consumer conformance spec', function (): void {
     config()->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
 

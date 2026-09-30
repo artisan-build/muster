@@ -50,7 +50,7 @@ final class UnhealthyMonitorsTool extends Tool
             'statuses' => ['sometimes', 'array', 'list', 'min:1'],
             'statuses.*' => ['string', Rule::in(self::STATUSES)],
             'cursor' => ['sometimes', 'string'],
-            'limit' => ['sometimes', 'integer', 'between:1,100'],
+            'limit' => ['sometimes', 'integer:strict', 'between:1,100'],
         ]);
         $statuses = $validated['statuses'] ?? self::STATUSES;
         $limit = $validated['limit'] ?? 25;
@@ -58,6 +58,23 @@ final class UnhealthyMonitorsTool extends Tool
 
         /** @var Collection<int, Monitor> $monitors */
         $monitors = CredentialPartition::local()->monitors()
+            ->select([
+                'id',
+                'name',
+                'status',
+                'schedule_key',
+                'command',
+                'display',
+                'expression',
+                'timezone',
+                'cadence_seconds',
+                'grace_seconds',
+                'last_check_in_at',
+                'next_due_at',
+                'last_exit_code',
+                'last_runtime',
+                'background',
+            ])
             ->where('is_enabled', true)
             ->whereIn('status', $statuses)
             ->when($cursorId !== null, fn (Builder $query): Builder => $query->where('id', '>', $cursorId))

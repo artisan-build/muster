@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Mcp\MusterMcpServer;
+use App\Mcp\Support\Cursor;
 use App\Mcp\Tools\MonitorHistoryTool;
 use App\Mcp\Tools\UnhealthyMonitorsTool;
 use App\Models\AlertDelivery;
@@ -25,7 +26,10 @@ use ArtisanBuild\BuiltForCloud\OperatorAbility;
 use ArtisanBuild\BuiltForCloud\SubjectType;
 use ArtisanBuild\BuiltForCloud\Testing\McpDelegatedTools;
 use ArtisanBuild\BuiltForCloud\Testing\MintedTestCredential;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use Laravel\Mcp\Facades\Mcp;
@@ -34,6 +38,7 @@ use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
+use PHPUnit\Framework\AssertionFailedError;
 
 #[Name('synthetic_write')]
 #[IsReadOnly(false)]
@@ -226,36 +231,104 @@ it('neither lists nor calls a synthetic write tool through a read door', functio
 it('paginates more than one hundred local unhealthy monitors without duplicate or skip', function (): void {
     $local = CredentialPartition::local();
     $foreign = createMcpPartition('unhealthy-foreign');
+    $emailSentinel = 'EMAIL-MUST-NEVER-LEAVE-'.bin2hex(random_bytes(8));
+    $webhookSentinel = 'WEBHOOK-MUST-NEVER-LEAVE-'.bin2hex(random_bytes(8));
     $expectedIds = [];
 
     foreach (range(1, 105) as $index) {
-        $expectedIds[] = createMcpMonitor($local, 'Local unhealthy '.$index, match ($index % 3) {
+        $monitor = createMcpMonitor($local, 'Local unhealthy '.$index, match ($index % 3) {
             0 => 'late',
             1 => 'missed',
             default => 'failed',
-        })->id;
+        });
+
+        if ($index === 1) {
+            $monitor->forceFill([
+                'email_alert_destination' => $emailSentinel.'@example.test',
+                'webhook_alert_destination' => 'https://'.$webhookSentinel.'.example.test/hook',
+            ])->save();
+        }
+
+        $expectedIds[] = $monitor->id;
     }
 
     createMcpMonitor($local, 'Local healthy', 'healthy');
     createMcpMonitor($local, 'Local disabled', 'missed', false);
     $foreignMonitor = createMcpMonitor($foreign, 'Foreign unhealthy');
     $credential = musterMcpCredential();
+    $monitorQueries = [];
+    $hydratedMonitorAttributes = [];
+    $monitorRetrievedEvent = 'eloquent.retrieved: '.Monitor::class;
+    DB::listen(function (QueryExecuted $query) use (&$monitorQueries): void {
+        if (preg_match('/\bfrom\s+["`]?monitors["`]?\b/i', $query->sql) === 1) {
+            $monitorQueries[] = $query->sql;
+        }
+    });
+    Event::listen($monitorRetrievedEvent, function (Monitor $monitor) use (&$hydratedMonitorAttributes): void {
+        $hydratedMonitorAttributes[] = array_keys($monitor->getAttributes());
+    });
+
+    $maximumResponse = musterMcpToolCall($credential, 'unhealthy_monitors', ['limit' => 100]);
+    $maximumPage = musterMcpPayload($maximumResponse);
+    expect($maximumPage['monitors'])->toHaveCount(100)
+        ->and($maximumPage['next_cursor'])->toBeString();
+
     $seen = [];
     $cursor = null;
+    $serialized = $maximumResponse->getContent();
 
     do {
         $arguments = $cursor === null ? [] : ['cursor' => $cursor];
-        $page = musterMcpPayload(musterMcpToolCall($credential, 'unhealthy_monitors', $arguments));
+        $response = musterMcpToolCall($credential, 'unhealthy_monitors', $arguments);
+        $serialized .= $response->getContent();
+        $page = musterMcpPayload($response);
 
         expect($page['monitors'])->toHaveCount($cursor === null ? 25 : count($page['monitors']));
         array_push($seen, ...array_column($page['monitors'], 'id'));
         $cursor = $page['next_cursor'];
     } while ($cursor !== null);
 
+    Event::forget($monitorRetrievedEvent);
+
     expect($seen)->toBe($expectedIds)
         ->and($seen)->toHaveCount(105)
         ->and(array_unique($seen))->toHaveCount(105)
-        ->and($seen)->not->toContain($foreignMonitor->id);
+        ->and($seen)->not->toContain($foreignMonitor->id)
+        ->and($serialized)->not->toContain($emailSentinel)
+        ->and($serialized)->not->toContain($webhookSentinel)
+        ->and($serialized)->not->toContain('email_alert_destination')
+        ->and($serialized)->not->toContain('webhook_alert_destination')
+        ->and($monitorQueries)->not->toBeEmpty()
+        ->and($hydratedMonitorAttributes)->not->toBeEmpty();
+
+    foreach ($monitorQueries as $query) {
+        expect($query)->not->toContain('email_alert_destination')
+            ->and($query)->not->toContain('webhook_alert_destination');
+    }
+
+    $expectedAttributes = [
+        'id',
+        'name',
+        'status',
+        'schedule_key',
+        'command',
+        'display',
+        'expression',
+        'timezone',
+        'cadence_seconds',
+        'grace_seconds',
+        'last_check_in_at',
+        'next_due_at',
+        'last_exit_code',
+        'last_runtime',
+        'background',
+    ];
+    sort($expectedAttributes);
+
+    foreach ($hydratedMonitorAttributes as $attributes) {
+        sort($attributes);
+        expect($attributes)->toBe($expectedAttributes);
+    }
 });
 
 it('paginates local monitor history and never serializes alert destinations', function (): void {
@@ -263,12 +336,19 @@ it('paginates local monitor history and never serializes alert destinations', fu
     $foreign = createMcpPartition('history-foreign');
     $monitor = createMcpMonitor($local, 'History local');
     $foreignMonitor = createMcpMonitor($foreign, 'History foreign');
+    $emailSentinel = 'EMAIL-MUST-NEVER-LEAVE-'.bin2hex(random_bytes(8));
+    $webhookSentinel = 'WEBHOOK-MUST-NEVER-LEAVE-'.bin2hex(random_bytes(8));
+    $deliverySentinel = 'DELIVERY-MUST-NEVER-LEAVE-'.bin2hex(random_bytes(8));
+    $monitor->forceFill([
+        'email_alert_destination' => $emailSentinel.'@example.test',
+        'webhook_alert_destination' => 'https://'.$webhookSentinel.'.example.test/hook',
+    ])->save();
     $events = [];
 
     foreach (range(1, 105) as $index) {
         $events[] = $monitor->events()->create([
             'event_type' => $index % 2 === 0 ? CheckInEvent::TYPE_CHECK_IN : CheckInEvent::TYPE_MISSED,
-            'occurred_at' => sprintf('2026-09-30 09:%02d:%02d', intdiv($index - 1, 60), ($index - 1) % 60),
+            'occurred_at' => '2026-09-30 09:00:00',
             'monitor_name' => $monitor->name,
             'command' => 'php artisan reports:run',
             'display' => 'reports:run',
@@ -283,10 +363,9 @@ it('paginates local monitor history and never serializes alert destinations', fu
         ]);
     }
 
-    $sentinel = 'DESTINATION-MUST-NEVER-LEAVE-'.bin2hex(random_bytes(8));
     $delivery = $events[104]->alertDeliveries()->create([
         'channel' => AlertDelivery::CHANNEL_WEBHOOK,
-        'destination' => 'https://'.$sentinel.'.example.test/hook',
+        'destination' => 'https://'.$deliverySentinel.'.example.test/hook',
     ]);
     $delivery->forceFill([
         'status' => AlertDelivery::STATUS_FAILED,
@@ -306,9 +385,29 @@ it('paginates local monitor history and never serializes alert destinations', fu
         ->values()
         ->all();
     $credential = musterMcpCredential();
+    $monitorQueries = [];
+    $hydratedMonitorAttributes = [];
+    $monitorRetrievedEvent = 'eloquent.retrieved: '.Monitor::class;
+    DB::listen(function (QueryExecuted $query) use (&$monitorQueries): void {
+        if (preg_match('/\bfrom\s+["`]?monitors["`]?\b/i', $query->sql) === 1) {
+            $monitorQueries[] = $query->sql;
+        }
+    });
+    Event::listen($monitorRetrievedEvent, function (Monitor $monitor) use (&$hydratedMonitorAttributes): void {
+        $hydratedMonitorAttributes[] = array_keys($monitor->getAttributes());
+    });
+
+    $maximumResponse = musterMcpToolCall($credential, 'monitor_history', [
+        'monitor_id' => $monitor->id,
+        'limit' => 100,
+    ]);
+    $maximumPage = musterMcpPayload($maximumResponse);
+    expect($maximumPage['events'])->toHaveCount(100)
+        ->and($maximumPage['next_cursor'])->toBeString();
+
     $seen = [];
     $cursor = null;
-    $serialized = '';
+    $serialized = $maximumResponse->getContent();
 
     do {
         $arguments = ['monitor_id' => $monitor->id];
@@ -324,11 +423,34 @@ it('paginates local monitor history and never serializes alert destinations', fu
         $cursor = $page['next_cursor'];
     } while ($cursor !== null);
 
+    Event::forget($monitorRetrievedEvent);
+
     expect($seen)->toBe($expectedIds)
         ->and($seen)->toHaveCount(105)
         ->and(array_unique($seen))->toHaveCount(105)
-        ->and($serialized)->not->toContain($sentinel, 'destination')
+        ->and($serialized)->not->toContain($emailSentinel)
+        ->and($serialized)->not->toContain($webhookSentinel)
+        ->and($serialized)->not->toContain($deliverySentinel)
+        ->and($serialized)->not->toContain('email_alert_destination')
+        ->and($serialized)->not->toContain('webhook_alert_destination')
+        ->and($serialized)->not->toContain('destination')
         ->and($serialized)->toContain('connection_refused', 'attempt_count', 'last_attempt_at');
+
+    expect(fn () => expect($serialized.$deliverySentinel)->not->toContain($deliverySentinel))
+        ->toThrow(AssertionFailedError::class);
+
+    expect($monitorQueries)->not->toBeEmpty()
+        ->and($hydratedMonitorAttributes)->not->toBeEmpty();
+
+    foreach ($monitorQueries as $query) {
+        expect($query)->not->toContain('email_alert_destination')
+            ->and($query)->not->toContain('webhook_alert_destination');
+    }
+
+    foreach ($hydratedMonitorAttributes as $attributes) {
+        sort($attributes);
+        expect($attributes)->toBe(['id', 'name', 'status']);
+    }
 
     $foreignResponse = musterMcpToolCall($credential, 'monitor_history', ['monitor_id' => $foreignMonitor->id]);
     $missingResponse = musterMcpToolCall($credential, 'monitor_history', ['monitor_id' => PHP_INT_MAX]);
@@ -340,26 +462,45 @@ it('rejects malformed arguments for every tool through the HTTP transport', func
     $monitor = createMcpMonitor(CredentialPartition::local(), 'Validation local');
     $credential = musterMcpCredential();
     $cases = [
-        ['unhealthy_monitors', ['unknown' => true]],
-        ['unhealthy_monitors', (object) ['0' => 'numeric-key']],
-        ['unhealthy_monitors', ['statuses' => ['unknown']]],
-        ['unhealthy_monitors', ['statuses' => ['late' => true]]],
-        ['unhealthy_monitors', ['cursor' => 'not-a-cursor']],
-        ['unhealthy_monitors', ['limit' => 0]],
-        ['unhealthy_monitors', ['limit' => 101]],
-        ['monitor_history', ['monitor_id' => $monitor->id, 'unknown' => true]],
-        ['monitor_history', (object) ['0' => 'numeric-key', 'monitor_id' => $monitor->id]],
-        ['monitor_history', ['monitor_id' => $monitor->id, 'event_types' => ['unknown']]],
-        ['monitor_history', ['monitor_id' => $monitor->id, 'event_types' => ['missed' => true]]],
-        ['monitor_history', ['monitor_id' => $monitor->id, 'cursor' => 'not-a-cursor']],
-        ['monitor_history', ['monitor_id' => $monitor->id, 'limit' => 0]],
-        ['monitor_history', ['monitor_id' => $monitor->id, 'limit' => 101]],
+        ['unhealthy_monitors', ['unknown' => true], 'Unknown top-level argument.'],
+        ['unhealthy_monitors', (object) ['0' => 'numeric-key'], 'Invalid params: The [arguments] member must be an object.'],
+        ['unhealthy_monitors', ['statuses' => ['unknown']], 'statuses.0'],
+        ['unhealthy_monitors', ['statuses' => ['late' => true]], 'statuses'],
+        ['unhealthy_monitors', ['cursor' => 'not-a-cursor'], 'cursor is invalid'],
+        ['unhealthy_monitors', ['cursor' => Cursor::encode(['wrong_id' => 1])], 'cursor is invalid'],
+        ['unhealthy_monitors', ['limit' => 0], 'limit'],
+        ['unhealthy_monitors', ['limit' => 101], 'limit'],
+        ['unhealthy_monitors', ['limit' => '100'], 'limit field must be an integer'],
+        ['monitor_history', ['monitor_id' => $monitor->id, 'unknown' => true], 'Unknown top-level argument.'],
+        ['monitor_history', (object) ['0' => 'numeric-key', 'monitor_id' => $monitor->id], 'Unknown top-level argument.'],
+        ['monitor_history', ['monitor_id' => ''.$monitor->id], 'monitor id field must be an integer'],
+        ['monitor_history', ['monitor_id' => $monitor->id, 'event_types' => ['unknown']], 'event_types.0'],
+        ['monitor_history', ['monitor_id' => $monitor->id, 'event_types' => ['missed' => true]], 'event_types'],
+        ['monitor_history', ['monitor_id' => $monitor->id, 'cursor' => 'not-a-cursor'], 'cursor is invalid'],
+        ['monitor_history', [
+            'monitor_id' => $monitor->id,
+            'cursor' => Cursor::encode(['occurred_at' => '2026-09-30T09:00:00.000000Z', 'wrong_id' => 1]),
+        ], 'cursor is invalid'],
+        ['monitor_history', [
+            'monitor_id' => $monitor->id,
+            'cursor' => Cursor::encode(['occurred_at' => '2026-09-30T09:00:00.000000+00:00', 'id' => 1]),
+        ], 'cursor is invalid'],
+        ['monitor_history', ['monitor_id' => $monitor->id, 'limit' => 0], 'limit'],
+        ['monitor_history', ['monitor_id' => $monitor->id, 'limit' => 101], 'limit'],
+        ['monitor_history', ['monitor_id' => $monitor->id, 'limit' => '100'], 'limit field must be an integer'],
     ];
 
-    foreach ($cases as [$tool, $arguments]) {
+    foreach ($cases as [$tool, $arguments, $expectedMessage]) {
         $response = musterMcpToolCall($credential, $tool, $arguments);
 
-        expect($response->getStatusCode())->toBeIn([200, 400])
-            ->and($response->json('result.isError') === true || is_array($response->json('error')))->toBeTrue();
+        if ($response->getStatusCode() === 200) {
+            $response->assertJsonPath('result.isError', true);
+            $message = $response->json('result.content.0.text');
+        } else {
+            $response->assertBadRequest()->assertJsonPath('error.code', -32602);
+            $message = $response->json('error.message');
+        }
+
+        expect($message)->toBeString()->toContain($expectedMessage);
     }
 });
