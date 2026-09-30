@@ -58,13 +58,17 @@ final class MonitorHistoryTool extends Tool
     public function handle(Request $request): Response
     {
         $validated = $this->validateClosed($request, [
-            'monitor_id' => ['required', 'integer', 'min:1'],
+            'monitor_id' => ['required', 'integer:strict', 'min:1'],
             'event_types' => ['sometimes', 'array', 'list', 'min:1'],
             'event_types.*' => ['string', Rule::in(self::EVENT_TYPES)],
             'cursor' => ['sometimes', 'string'],
-            'limit' => ['sometimes', 'integer', 'between:1,100'],
+            'limit' => ['sometimes', 'integer:strict', 'between:1,100'],
         ]);
-        $monitor = CredentialPartition::local()->monitors()->find($validated['monitor_id']);
+        $monitor = CredentialPartition::local()->monitors()->find($validated['monitor_id'], [
+            'id',
+            'name',
+            'status',
+        ]);
 
         if ($monitor === null) {
             return Response::error('Monitor not found.');
@@ -193,11 +197,15 @@ final class MonitorHistoryTool extends Tool
             $this->invalidCursor();
         }
 
-        $occurredAt = CarbonImmutable::createFromFormat(
-            '!Y-m-d\TH:i:s.u\Z',
-            $values['occurred_at'],
-            'UTC',
-        );
+        try {
+            $occurredAt = CarbonImmutable::createFromFormat(
+                '!Y-m-d\TH:i:s.u\Z',
+                $values['occurred_at'],
+                'UTC',
+            );
+        } catch (InvalidArgumentException) {
+            $this->invalidCursor();
+        }
 
         if ($occurredAt === null
             || $occurredAt->format('Y-m-d\TH:i:s.u\Z') !== $values['occurred_at']) {
