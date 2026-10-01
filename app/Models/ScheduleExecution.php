@@ -19,7 +19,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $exit_code
  * @property bool $background
  * @property string $timezone
- *
  * @mixin IdeHelperScheduleExecution
  */
 final class ScheduleExecution extends Model

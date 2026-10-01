@@ -37,7 +37,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $email_alert_destination
  * @property AlertModes $webhook_alert_modes
  * @property string|null $webhook_alert_destination
- *
  * @mixin IdeHelperMonitor
  */
 final class Monitor extends Model

@@ -25,7 +25,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property bool $background
  * @property CarbonImmutable|null $last_check_in_at
  * @property CarbonImmutable|null $next_due_at
- *
  * @mixin IdeHelperCheckInEvent
  */
 final class CheckInEvent extends Model

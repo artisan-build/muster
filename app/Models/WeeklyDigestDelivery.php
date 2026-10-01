@@ -25,7 +25,6 @@ use Illuminate\Database\Eloquent\Model;
  * @property string|null $processing_claim_id
  * @property CarbonImmutable|null $processing_claimed_at
  * @property CarbonImmutable|null $delivered_at
- *
  * @mixin IdeHelperWeeklyDigestDelivery
  */
 final class WeeklyDigestDelivery extends Model

@@ -19,7 +19,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property CarbonImmutable|null $last_attempt_at
  * @property CarbonImmutable|null $delivered_at
  * @property CheckInEvent $event
- *
  * @mixin IdeHelperAlertDelivery
  */
 final class AlertDelivery extends Model
