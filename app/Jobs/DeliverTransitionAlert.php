@@ -25,14 +25,9 @@ final class DeliverTransitionAlert implements ShouldQueue, SystemAuthorityQueueE
     public const int WEBHOOK_REQUEST_TIMEOUT = 10;
 
     /** @var list<string> */
-    private const array DELIVERY_MAIL_TRANSPORTS = [
-        'mailgun',
-        'postmark',
-        'resend',
-        'sendmail',
-        'ses',
-        'ses-v2',
-        'smtp',
+    private const array NON_DELIVERY_MAIL_TRANSPORTS = [
+        'array',
+        'log',
     ];
 
     public int $tries = 3;
@@ -154,16 +149,16 @@ final class DeliverTransitionAlert implements ShouldQueue, SystemAuthorityQueueE
             $transport = $parsedConfiguration['driver'] ?? null;
         }
 
-        if (! is_string($transport)) {
+        if (! is_string($transport) || $transport === '') {
             return false;
         }
 
-        if (in_array($transport, self::DELIVERY_MAIL_TRANSPORTS, true)) {
-            return true;
+        if (in_array($transport, self::NON_DELIVERY_MAIL_TRANSPORTS, true)) {
+            return false;
         }
 
         if (! in_array($transport, ['failover', 'roundrobin'], true)) {
-            return false;
+            return true;
         }
 
         $members = $configuration['mailers'] ?? null;
