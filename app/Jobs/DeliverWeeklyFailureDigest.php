@@ -23,14 +23,9 @@ final class DeliverWeeklyFailureDigest implements ShouldQueue, SystemAuthorityQu
     use Queueable;
 
     /** @var list<string> */
-    private const array DELIVERY_MAIL_TRANSPORTS = [
-        'mailgun',
-        'postmark',
-        'resend',
-        'sendmail',
-        'ses',
-        'ses-v2',
-        'smtp',
+    private const array NON_DELIVERY_MAIL_TRANSPORTS = [
+        'array',
+        'log',
     ];
 
     private const int MINIMUM_PROCESSING_LEASE_SECONDS = 30;
@@ -204,16 +199,16 @@ final class DeliverWeeklyFailureDigest implements ShouldQueue, SystemAuthorityQu
             $transport = $parsedConfiguration['driver'] ?? null;
         }
 
-        if (! is_string($transport)) {
+        if (! is_string($transport) || $transport === '') {
             return false;
         }
 
-        if (in_array($transport, self::DELIVERY_MAIL_TRANSPORTS, true)) {
-            return true;
+        if (in_array($transport, self::NON_DELIVERY_MAIL_TRANSPORTS, true)) {
+            return false;
         }
 
         if (! in_array($transport, ['failover', 'roundrobin'], true)) {
-            return false;
+            return true;
         }
 
         $members = $configuration['mailers'] ?? null;

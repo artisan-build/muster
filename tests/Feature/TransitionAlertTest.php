@@ -288,6 +288,21 @@ it('sends generated transition identity and timing through email and webhook han
         ->and($webhookDelivery->attempt_count)->toBe(1);
 });
 
+it('sends email alerts through the default scalpels mailer', function (): void {
+    config(['mail.default' => 'scalpels']);
+
+    expect(config('mail.mailers.scalpels'))->toBe(['transport' => 'scalpels']);
+
+    Mail::fake();
+    $delivery = createAlertDelivery(AlertDelivery::CHANNEL_EMAIL);
+
+    (new DeliverTransitionAlert($delivery->id))->handle();
+
+    Mail::assertSent(TransitionAlertMail::class, fn (TransitionAlertMail $mail): bool => $mail->hasTo($delivery->destination));
+    expect($delivery->refresh()->status)->toBe(AlertDelivery::STATUS_DELIVERED)
+        ->and($delivery->attempt_count)->toBe(1);
+});
+
 it('uses bounded retries and sanitizes non-2xx failures without duplicating logical delivery', function (): void {
     Http::fake(['*' => Http::response(['secret' => 'response-secret'], 500)]);
     $delivery = createAlertDelivery(AlertDelivery::CHANNEL_WEBHOOK);
