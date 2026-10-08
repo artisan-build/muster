@@ -966,6 +966,23 @@ it('sends to a current changed address and never transports to the generated add
         ->not->toContain($newAddress);
 });
 
+it('sends weekly digests through the default scalpels mailer', function (): void {
+    config(['mail.default' => 'scalpels']);
+
+    expect(config('mail.mailers.scalpels'))->toBe(['transport' => 'scalpels']);
+
+    Mail::fake();
+    $delivery = createWeeklyDigestDelivery('scalpels-digest-recipient@example.test');
+
+    runWeeklyDigestDelivery(new DeliverWeeklyFailureDigest($delivery->id));
+
+    Mail::assertSent(WeeklyFailureDigestMail::class, function (WeeklyFailureDigestMail $mail): bool {
+        return $mail->hasTo('scalpels-digest-recipient@example.test');
+    });
+    expect($delivery->refresh()->status)->toBe(WeeklyDigestDelivery::STATUS_DELIVERED)
+        ->and($delivery->attempt_count)->toBe(1);
+});
+
 it('keeps transport failure retryable and exposes only sanitized terminal failure state', function (): void {
     config(['mail.default' => 'log']);
     $handler = new TestHandler;
