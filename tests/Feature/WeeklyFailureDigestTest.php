@@ -976,9 +976,7 @@ it('sends weekly digests through the default scalpels mailer', function (): void
 
     runWeeklyDigestDelivery(new DeliverWeeklyFailureDigest($delivery->id));
 
-    Mail::assertSent(WeeklyFailureDigestMail::class, function (WeeklyFailureDigestMail $mail): bool {
-        return $mail->hasTo('scalpels-digest-recipient@example.test');
-    });
+    Mail::assertSent(WeeklyFailureDigestMail::class, fn (WeeklyFailureDigestMail $mail): bool => $mail->hasTo('scalpels-digest-recipient@example.test'));
     expect($delivery->refresh()->status)->toBe(WeeklyDigestDelivery::STATUS_DELIVERED)
         ->and($delivery->attempt_count)->toBe(1);
 });
