@@ -25,6 +25,7 @@ use ArtisanBuild\BuiltForCloud\Commands\OutboxDrainCommand;
 use ArtisanBuild\BuiltForCloud\Commands\OwnershipMintClaimCommand;
 use ArtisanBuild\BuiltForCloud\Commands\OwnershipRemintOwnerTokenCommand;
 use ArtisanBuild\BuiltForCloud\Commands\PruneCredentialAuthorizationsCommand;
+use ArtisanBuild\BuiltForCloud\Commands\SigningRootEnsureCommand;
 use ArtisanBuild\BuiltForCloud\Commands\SigningRootProvisionCommand;
 use ArtisanBuild\BuiltForCloud\Commands\SubjectOffboardCommand;
 use ArtisanBuild\BuiltForCloud\Commands\WarnExpiringCredentialsCommand;
@@ -111,6 +112,7 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
             OwnershipRemintOwnerTokenCommand::class,
             PruneCredentialAuthorizationsCommand::class,
             PublishWeeklyFailureDigests::class,
+            SigningRootEnsureCommand::class,
             SigningRootProvisionCommand::class,
             SubjectOffboardCommand::class,
             WarnExpiringCredentialsCommand::class,
