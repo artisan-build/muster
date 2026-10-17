@@ -193,6 +193,27 @@ it('enforces delivery uniqueness and serializes only an opaque identifier into t
         ->and($storedDestination)->not->toBe($delivery->destination);
 });
 
+it('dispatches production transition jobs that serialize to nothing but the opaque delivery identifier', function (): void {
+    Queue::fake();
+    $monitor = createTransitionAlertMonitor([
+        'status' => 'missed',
+        'last_check_in_at' => '2026-09-21 12:00:00',
+        'next_due_at' => '2026-09-21 12:05:00',
+    ]);
+
+    $monitor->recordActivity([CheckInEvent::TYPE_MISSED], now());
+
+    Queue::assertPushed(DeliverTransitionAlert::class, 2);
+    Queue::assertPushed(DeliverTransitionAlert::class, function (DeliverTransitionAlert $job): bool {
+        expect(serialize($job))
+            ->toContain('App\Jobs\DeliverTransitionAlert')
+            ->not->toContain('App\Models\AlertDelivery')
+            ->not->toContain('destination');
+
+        return true;
+    });
+});
+
 it('creates deliveries only for channels enabled when the transition occurs', function (): void {
     Queue::fake();
     $monitor = createTransitionAlertMonitor([
