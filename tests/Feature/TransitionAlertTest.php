@@ -206,8 +206,8 @@ it('dispatches production transition jobs that serialize to nothing but the opaq
     Queue::assertPushed(DeliverTransitionAlert::class, 2);
     Queue::assertPushed(DeliverTransitionAlert::class, function (DeliverTransitionAlert $job): bool {
         expect(serialize($job))
-            ->toContain('App\Jobs\DeliverTransitionAlert')
-            ->not->toContain('App\Models\AlertDelivery')
+            ->toContain(DeliverTransitionAlert::class)
+            ->not->toContain(AlertDelivery::class)
             ->not->toContain('destination');
 
         return true;
