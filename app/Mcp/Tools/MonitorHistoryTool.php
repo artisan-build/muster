@@ -58,7 +58,7 @@ final class MonitorHistoryTool extends Tool
 
     public function handle(Request $request): Response
     {
-        app(ActingPrincipalResolver::class)->require(request());
+        resolve(ActingPrincipalResolver::class)->require(request());
 
         $validated = $this->validateClosed($request, [
             'monitor_id' => ['required', 'integer:strict', 'min:1'],

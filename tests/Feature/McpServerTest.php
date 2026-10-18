@@ -167,14 +167,14 @@ function musterDelegatedSigningKey(): AsymmetricSecretKey
 {
     if (app()->bound('muster.testing.delegated-signing-key')) {
         /** @var AsymmetricSecretKey */
-        return app('muster.testing.delegated-signing-key');
+        return resolve('muster.testing.delegated-signing-key');
     }
 
     foreach (range(1, 16) as $ignored) {
         $secret = AsymmetricSecretKey::generate(new Version4);
 
         if (strlen($secret->raw()) === SODIUM_CRYPTO_SIGN_SECRETKEYBYTES) {
-            $keyring = app(ConsoleKeyring::class);
+            $keyring = resolve(ConsoleKeyring::class);
             $keyring->add('muster-test-k1', $secret->getPublicKey()->toHexString());
             $keyring->activate('muster-test-k1');
             app()->instance('muster.testing.delegated-signing-key', $secret);

@@ -47,7 +47,7 @@ final class UnhealthyMonitorsTool extends Tool
 
     public function handle(Request $request): Response
     {
-        app(ActingPrincipalResolver::class)->require(request());
+        resolve(ActingPrincipalResolver::class)->require(request());
 
         $validated = $this->validateClosed($request, [
             'statuses' => ['sometimes', 'array', 'list', 'min:1'],
