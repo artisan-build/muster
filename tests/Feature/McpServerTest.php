@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Mcp\MusterMcpServer;
 use App\Mcp\Support\Cursor;
 use App\Mcp\Tools\MonitorHistoryTool;
 use App\Mcp\Tools\UnhealthyMonitorsTool;
@@ -10,6 +9,10 @@ use App\Models\AlertDelivery;
 use App\Models\CheckInEvent;
 use App\Models\CredentialPartition;
 use App\Models\Monitor;
+use ArtisanBuild\BuiltForCloud\Console\ActingPrincipal;
+use ArtisanBuild\BuiltForCloud\Console\ActingPrincipalResolver;
+use ArtisanBuild\BuiltForCloud\Console\ConsoleKeyring;
+use ArtisanBuild\BuiltForCloud\Console\DelegatedActor;
 use ArtisanBuild\BuiltForCloud\Credential;
 use ArtisanBuild\BuiltForCloud\CredentialKind;
 use ArtisanBuild\BuiltForCloud\CredentialPurpose;
@@ -24,8 +27,10 @@ use ArtisanBuild\BuiltForCloud\Mcp\ToolClassification;
 use ArtisanBuild\BuiltForCloud\Mcp\ToolEffect;
 use ArtisanBuild\BuiltForCloud\OperatorAbility;
 use ArtisanBuild\BuiltForCloud\SubjectType;
-use ArtisanBuild\BuiltForCloud\Testing\McpDelegatedTools;
 use ArtisanBuild\BuiltForCloud\Testing\MintedTestCredential;
+use ArtisanBuild\BuiltForCloud\User;
+use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -38,7 +43,38 @@ use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
+use ParagonIE\Paseto\Builder;
+use ParagonIE\Paseto\Keys\Version4\AsymmetricSecretKey;
+use ParagonIE\Paseto\Protocol\Version4;
+use ParagonIE\Paseto\Purpose;
 use PHPUnit\Framework\AssertionFailedError;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
+
+final class CaptureMusterMcpPrincipal
+{
+    /** @var list<array{identifier: int|string|null, delegated: bool, principal_type: class-string|null, auth_identifier: int|string|null}> */
+    public static array $observations = [];
+
+    public function handle(Request $request, Closure $next): SymfonyResponse
+    {
+        $request->attributes->set(
+            ActingPrincipalResolver::OBSERVER_ATTRIBUTE,
+            static function (ActingPrincipal $principal): void {
+                $raw = $principal->principal;
+                $identifier = $raw instanceof Authenticatable ? $raw->getAuthIdentifier() : null;
+
+                self::$observations[] = [
+                    'identifier' => $principal->identifier(),
+                    'delegated' => $principal->delegated,
+                    'principal_type' => is_object($raw) ? $raw::class : null,
+                    'auth_identifier' => is_int($identifier) || is_string($identifier) ? $identifier : null,
+                ];
+            },
+        );
+
+        return $next($request);
+    }
+}
 
 #[Name('synthetic_write')]
 #[IsReadOnly(false)]
@@ -108,6 +144,96 @@ function musterMcpToolCall(
     ], $path);
 }
 
+/** @param array<int|string, mixed>|object $arguments */
+function musterDelegatedMcpToolCall(
+    string $assertion,
+    string $tool,
+    array|object $arguments = [],
+): TestResponse {
+    return test()->postJson('/mcp', [
+        'jsonrpc' => '2.0',
+        'id' => bin2hex(random_bytes(4)),
+        'method' => 'tools/call',
+        'params' => [
+            'name' => $tool,
+            'arguments' => $arguments,
+        ],
+    ], [
+        'Authorization' => 'Bearer '.$assertion,
+    ]);
+}
+
+function musterDelegatedSigningKey(): AsymmetricSecretKey
+{
+    if (app()->bound('muster.testing.delegated-signing-key')) {
+        /** @var AsymmetricSecretKey */
+        return app('muster.testing.delegated-signing-key');
+    }
+
+    foreach (range(1, 16) as $ignored) {
+        $secret = AsymmetricSecretKey::generate(new Version4);
+
+        if (strlen($secret->raw()) === SODIUM_CRYPTO_SIGN_SECRETKEYBYTES) {
+            $keyring = app(ConsoleKeyring::class);
+            $keyring->add('muster-test-k1', $secret->getPublicKey()->toHexString());
+            $keyring->activate('muster-test-k1');
+            app()->instance('muster.testing.delegated-signing-key', $secret);
+
+            return $secret;
+        }
+    }
+
+    throw new RuntimeException('Could not generate a delegated test signing key.');
+}
+
+function musterDelegatedAssertion(string $subject): string
+{
+    $issuer = 'https://scalpels-muster-test.example';
+    $audience = 'https://muster-deployment-test.example';
+    $now = CarbonImmutable::now();
+
+    config([
+        'built-for-cloud.console.issuer' => $issuer,
+        'built-for-cloud.console.audience' => $audience,
+    ]);
+
+    return (new Builder)
+        ->setVersion(new Version4)
+        ->setPurpose(Purpose::public())
+        ->setKey(musterDelegatedSigningKey())
+        ->setClaims([
+            'iss' => $issuer,
+            'sub' => $subject,
+            'aud' => $audience,
+            'iat' => $now->toAtomString(),
+            'nbf' => $now->toAtomString(),
+            'exp' => $now->addSeconds(90)->toAtomString(),
+            'jti' => 'muster-mint-'.bin2hex(random_bytes(8)),
+            'display_name' => 'Muster delegated test operator',
+            'role' => 'member',
+            'purpose' => 'mcp',
+        ])
+        ->setFooterArray(['kid' => 'muster-test-k1'])
+        ->toString();
+}
+
+function captureMusterMcpPrincipals(): void
+{
+    CaptureMusterMcpPrincipal::$observations = [];
+    $route = Route::getRoutes()->match(Request::create('/mcp', 'POST'));
+    $route->middleware(CaptureMusterMcpPrincipal::class);
+}
+
+/** @param list<string> $tables */
+function musterDataQueries(array $queries, array $tables): array
+{
+    return array_values(array_filter(
+        $queries,
+        static fn (string $query): bool => collect($tables)
+            ->contains(static fn (string $table): bool => preg_match('/\b'.preg_quote($table, '/').'\b/i', $query) === 1),
+    ));
+}
+
 /** @return array<string, mixed> */
 function musterMcpPayload(TestResponse $response): array
 {
@@ -162,17 +288,25 @@ it('advertises only the verified delegated effect-scoped read door', function ()
     expect(resolve('router')->gatherRouteMiddleware($route))
         ->toContain(AuthenticateMcp::class.':product,read');
 
-    $this->postJson('/mcp')->assertUnauthorized();
+    $queries = [];
+    DB::listen(static function (QueryExecuted $query) use (&$queries): void {
+        $queries[] = $query->sql;
+    });
+
+    $this->postJson('/mcp', [
+        'jsonrpc' => '2.0',
+        'id' => 'missing-identity',
+        'method' => 'tools/call',
+        'params' => ['name' => 'unhealthy_monitors', 'arguments' => []],
+    ])->assertUnauthorized()->assertJsonPath('message', 'Unauthenticated.');
+
+    expect(musterDataQueries($queries, ['credential_partitions', 'monitors', 'check_in_events', 'alert_deliveries']))
+        ->toBe([]);
 });
 
 it('conforms and exposes the exact closed read tool set', function (): void {
     $expected = [MonitorHistoryTool::class, UnhealthyMonitorsTool::class];
     sort($expected);
-
-    $conformance = McpDelegatedTools::discover(MusterMcpServer::class);
-
-    expect($conformance['tools'])->toBe($expected)
-        ->and($conformance['violations'])->toBe([]);
 
     foreach ($expected as $toolClass) {
         $reflection = new ReflectionClass($toolClass);
@@ -208,6 +342,89 @@ it('conforms and exposes the exact closed read tool set', function (): void {
         ->and(array_keys($schemas['monitor_history']['properties']))->toBe(['monitor_id', 'event_types', 'cursor', 'limit'])
         ->and($schemas['unhealthy_monitors']['additionalProperties'])->toBeFalse()
         ->and($schemas['monitor_history']['additionalProperties'])->toBeFalse();
+});
+
+it('shows the same installation-owned local monitor to two distinct delegated subjects', function (): void {
+    captureMusterMcpPrincipals();
+    $localMonitor = createMcpMonitor(CredentialPartition::local(), 'Shared delegated local monitor');
+    $foreignMonitor = createMcpMonitor(createMcpPartition('delegated-subject-foreign'), 'Foreign delegated monitor');
+    $subjectResults = [];
+
+    foreach (['delegated-subject-a', 'delegated-subject-b'] as $subject) {
+        $response = musterDelegatedMcpToolCall(
+            musterDelegatedAssertion($subject),
+            'unhealthy_monitors',
+        );
+        $payload = musterMcpPayload($response);
+        $ids = array_column($payload['monitors'], 'id');
+
+        expect($ids)->toContain($localMonitor->id)
+            ->not->toContain($foreignMonitor->id);
+
+        $subjectResults[] = CaptureMusterMcpPrincipal::$observations[array_key_last(CaptureMusterMcpPrincipal::$observations)];
+    }
+
+    expect($subjectResults[0]['identifier'])->toStartWith(DelegatedActor::IDENTIFIER_PREFIX)
+        ->and($subjectResults[1]['identifier'])->toStartWith(DelegatedActor::IDENTIFIER_PREFIX)
+        ->and($subjectResults[0]['identifier'])->not->toBe($subjectResults[1]['identifier'])
+        ->and($subjectResults[0]['delegated'])->toBeTrue()
+        ->and($subjectResults[1]['delegated'])->toBeTrue()
+        ->and($subjectResults[0]['principal_type'])->toBe(DelegatedActor::class)
+        ->and($subjectResults[1]['principal_type'])->toBe(DelegatedActor::class);
+})->note('Muster rows are installation-owned, so negative_authorization is absent: both delegated subjects intentionally read the same local partition.');
+
+it('keeps a delegated actor type-qualified after a same-id local user is created', function (): void {
+    captureMusterMcpPrincipals();
+    $localMonitor = createMcpMonitor(CredentialPartition::local(), 'Collision local monitor');
+    $foreignMonitor = createMcpMonitor(createMcpPartition('collision-foreign'), 'Collision foreign monitor');
+    $subject = 'delegated-numeric-collision';
+
+    musterDelegatedMcpToolCall(musterDelegatedAssertion($subject), 'unhealthy_monitors')->assertOk();
+    $actor = DelegatedActor::query()->where('subject', $subject)->sole();
+    User::query()->forceCreate([
+        'id' => $actor->getKey(),
+        'name' => 'Same id local user',
+        'email' => 'same-id-'.bin2hex(random_bytes(6)).'@example.test',
+        'email_verified_at' => now(),
+    ]);
+    CaptureMusterMcpPrincipal::$observations = [];
+
+    $payload = musterMcpPayload(musterDelegatedMcpToolCall(
+        musterDelegatedAssertion($subject),
+        'unhealthy_monitors',
+    ));
+    $ids = array_column($payload['monitors'], 'id');
+    $observation = CaptureMusterMcpPrincipal::$observations[0];
+    $qualified = DelegatedActor::IDENTIFIER_PREFIX.$actor->getKey();
+
+    expect($ids)->toContain($localMonitor->id)
+        ->not->toContain($foreignMonitor->id)
+        ->and($observation['identifier'])->toBe($qualified)
+        ->and($observation['auth_identifier'])->toBe($qualified)
+        ->and($observation['identifier'])->not->toBe((string) $actor->getKey())
+        ->and($observation['principal_type'])->toBe(DelegatedActor::class)
+        ->and($observation['delegated'])->toBeTrue();
+});
+
+it('refuses an inactive delegated subject before any Muster data query', function (): void {
+    captureMusterMcpPrincipals();
+    createMcpMonitor(CredentialPartition::local(), 'Inactive delegated local monitor');
+    $subject = 'inactive-delegated-subject';
+
+    musterDelegatedMcpToolCall(musterDelegatedAssertion($subject), 'unhealthy_monitors')->assertOk();
+    DelegatedActor::query()->where('subject', $subject)->sole()->deactivate();
+    CaptureMusterMcpPrincipal::$observations = [];
+    $queries = [];
+    DB::listen(static function (QueryExecuted $query) use (&$queries): void {
+        $queries[] = $query->sql;
+    });
+
+    musterDelegatedMcpToolCall(musterDelegatedAssertion($subject), 'unhealthy_monitors')
+        ->assertUnauthorized()
+        ->assertJsonPath('message', 'Unauthenticated.');
+
+    expect(CaptureMusterMcpPrincipal::$observations)->toBe([])
+        ->and(musterDataQueries($queries, ['credential_partitions', 'monitors', 'check_in_events', 'alert_deliveries']))->toBe([]);
 });
 
 it('neither lists nor calls a synthetic write tool through a read door', function (): void {

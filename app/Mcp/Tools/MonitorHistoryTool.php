@@ -9,6 +9,7 @@ use App\Mcp\Tools\Concerns\ValidatesClosedInput;
 use App\Models\AlertDelivery;
 use App\Models\CheckInEvent;
 use App\Models\CredentialPartition;
+use ArtisanBuild\BuiltForCloud\Console\ActingPrincipalResolver;
 use ArtisanBuild\BuiltForCloud\Mcp\AdvertisesToolClassification;
 use ArtisanBuild\BuiltForCloud\Mcp\AdvertisesToolEffect;
 use ArtisanBuild\BuiltForCloud\Mcp\Classification;
@@ -57,6 +58,8 @@ final class MonitorHistoryTool extends Tool
 
     public function handle(Request $request): Response
     {
+        app(ActingPrincipalResolver::class)->require(request());
+
         $validated = $this->validateClosed($request, [
             'monitor_id' => ['required', 'integer:strict', 'min:1'],
             'event_types' => ['sometimes', 'array', 'list', 'min:1'],
