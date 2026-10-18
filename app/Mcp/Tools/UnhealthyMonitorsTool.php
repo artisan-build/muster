@@ -8,6 +8,7 @@ use App\Mcp\Support\Cursor;
 use App\Mcp\Tools\Concerns\ValidatesClosedInput;
 use App\Models\CredentialPartition;
 use App\Models\Monitor;
+use ArtisanBuild\BuiltForCloud\Console\ActingPrincipalResolver;
 use ArtisanBuild\BuiltForCloud\Mcp\AdvertisesToolClassification;
 use ArtisanBuild\BuiltForCloud\Mcp\AdvertisesToolEffect;
 use ArtisanBuild\BuiltForCloud\Mcp\Classification;
@@ -46,6 +47,8 @@ final class UnhealthyMonitorsTool extends Tool
 
     public function handle(Request $request): Response
     {
+        resolve(ActingPrincipalResolver::class)->require(request());
+
         $validated = $this->validateClosed($request, [
             'statuses' => ['sometimes', 'array', 'list', 'min:1'],
             'statuses.*' => ['string', Rule::in(self::STATUSES)],
