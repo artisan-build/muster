@@ -12,6 +12,7 @@ use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 use Illuminate\Console\Scheduling\EventMutex;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Event;
+use Psr\Log\LoggerInterface;
 
 final class MusterClientTestMutex implements EventMutex
 {
@@ -294,8 +295,63 @@ it('leaves background events operationally untouched unless both connection valu
 it('fails open when Muster cannot receive an event', function (): void {
     configureMusterClient();
     musterClientPrivateHttp()->fake(fn (): never => throw new RuntimeException('Test-created outage.'));
+    $records = [];
+    app()->instance(LoggerInterface::class, new class($records) implements LoggerInterface
+    {
+        public function __construct(private array &$records) {}
+
+        public function log($level, string|Stringable $message, array $context = []): void
+        {
+            $this->records[] = ['level' => $level, 'message' => (string) $message, 'context' => $context];
+        }
+
+        public function emergency(string|Stringable $message, array $context = []): void
+        {
+            $this->log('emergency', $message, $context);
+        }
+
+        public function alert(string|Stringable $message, array $context = []): void
+        {
+            $this->log('alert', $message, $context);
+        }
+
+        public function critical(string|Stringable $message, array $context = []): void
+        {
+            $this->log('critical', $message, $context);
+        }
+
+        public function error(string|Stringable $message, array $context = []): void
+        {
+            $this->log('error', $message, $context);
+        }
+
+        public function warning(string|Stringable $message, array $context = []): void
+        {
+            $this->log('warning', $message, $context);
+        }
+
+        public function notice(string|Stringable $message, array $context = []): void
+        {
+            $this->log('notice', $message, $context);
+        }
+
+        public function info(string|Stringable $message, array $context = []): void
+        {
+            $this->log('info', $message, $context);
+        }
+
+        public function debug(string|Stringable $message, array $context = []): void
+        {
+            $this->log('debug', $message, $context);
+        }
+    });
 
     runMusterForeground(musterScheduledEvent());
 
     expect(true)->toBeTrue();
+
+    foreach ($records as $record) {
+        expect($record['context'])->toBe(['exception_class' => RuntimeException::class])
+            ->and($record['message'])->not->toContain('Test-created outage.');
+    }
 });
