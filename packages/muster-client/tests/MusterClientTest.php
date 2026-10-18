@@ -350,6 +350,8 @@ it('fails open when Muster cannot receive an event', function (): void {
 
     expect(true)->toBeTrue();
 
+    expect($records)->not->toBe([]);
+
     foreach ($records as $record) {
         expect($record['context'])->toBe(['exception_class' => RuntimeException::class])
             ->and($record['message'])->not->toContain('Test-created outage.');
