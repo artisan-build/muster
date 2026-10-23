@@ -36,7 +36,7 @@ function createAlertConfigurationMonitor(): Monitor
 it('shows independent email and webhook controls only to authenticated operators', function (): void {
     $monitor = createAlertConfigurationMonitor();
 
-    $this->get(route('monitors.edit', $monitor))->assertRedirect('/bfc/login');
+    $this->get(route('monitors.edit', $monitor))->assertRedirect(route('bfc.login', ['intended' => route('monitors.edit', $monitor, false)]));
 
     signInForAlertConfiguration();
 
