@@ -48,6 +48,7 @@ function issueStateEngineBearer(): array
     $request = Request::create('/bfc/device-authorizations', 'POST');
     $request->setUserResolver(static fn (): User => $user);
     $request->setLaravelSession(resolve('session')->driver());
+    app()->instance('request', $request);
 
     $start = resolve(StartDeviceAuthorization::class)(
         $request,
