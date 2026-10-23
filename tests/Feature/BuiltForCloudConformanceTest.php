@@ -10,6 +10,7 @@ use App\Jobs\DeliverWeeklyFailureDigest;
 use App\Mcp\MusterMcpServer;
 use App\Mcp\Tools\MonitorHistoryTool;
 use App\Mcp\Tools\UnhealthyMonitorsTool;
+use App\Models\CredentialPartition;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleReKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleRetireKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\CreateAdminCommand;
@@ -34,6 +35,7 @@ use ArtisanBuild\BuiltForCloud\Jobs\DeliverOwnershipWebhook;
 use ArtisanBuild\BuiltForCloud\Testing\ConsumerConformance;
 use ArtisanBuild\BuiltForCloud\Testing\ContractAssertions;
 use ArtisanBuild\BuiltForCloud\Testing\FleetConformance;
+use ArtisanBuild\BuiltForCloud\Testing\McpDelegatedEnforcement;
 use Composer\InstalledVersions;
 
 uses(ContractAssertions::class);
@@ -139,6 +141,18 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
             UnhealthyMonitorsTool::class,
         ]),
     ];
+
+    $monitor = CredentialPartition::local()->monitors()->create([
+        'name' => 'Delegated enforcement monitor',
+        'cadence_seconds' => 300,
+        'grace_seconds' => 30,
+    ]);
+
+    McpDelegatedEnforcement::assertHonors(
+        MusterMcpServer::class,
+        [UnhealthyMonitorsTool::class, MonitorHistoryTool::class],
+        arguments: [MonitorHistoryTool::class => ['monitor_id' => $monitor->id]],
+    );
 
     $report = (new FleetConformance($this))->assert(new ConsumerConformance(
         consumer: 'muster',
