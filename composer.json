@@ -12,8 +12,8 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
-        "artisan-build/built-for-cloud": "^0.20",
-        "artisan-build/hone-client": "^1.8.1",
+        "artisan-build/built-for-cloud": "^0.22.0",
+        "artisan-build/hone-client": "^1.8.2",
         "laravel/chisel": "^0.1.0",
         "laravel/framework": "^13.19",
         "laravel/mcp": "^1.0",
@@ -159,6 +159,11 @@
         }
     },
     "config": {
+        "audit": {
+            "ignore-abandoned": [
+                "symplify/rule-doc-generator-contracts"
+            ]
+        },
         "optimize-autoloader": true,
         "preferred-install": "dist",
         "sort-packages": true,

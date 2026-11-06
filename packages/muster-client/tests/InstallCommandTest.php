@@ -290,6 +290,7 @@ it('rejects unsuccessful or incorrectly bound loopback exchanges', function (int
         ->and($listener->closed)->toBeTrue();
 })->with([
     'failed status' => [503, ['error' => 'temporarily_unavailable']],
+    'valid payload on failed status' => [503, ['access_token' => 'test-created-token', 'token_type' => 'Bearer', 'credential_id' => 'id', 'app_purpose' => 'muster.check-in']],
     'wrong token type' => [200, ['access_token' => 'test-created-token', 'token_type' => 'Basic', 'credential_id' => 'id', 'app_purpose' => 'muster.check-in']],
     'wrong app purpose' => [200, ['access_token' => 'test-created-token', 'token_type' => 'Bearer', 'credential_id' => 'id', 'app_purpose' => 'muster.history.read']],
     'missing credential id' => [200, ['access_token' => 'test-created-token', 'token_type' => 'Bearer', 'app_purpose' => 'muster.check-in']],

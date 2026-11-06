@@ -1327,6 +1327,10 @@ it('returns an indistinguishable denial for schedule-event credential refusal cl
         'missing' => $this->postJson(route('schedule-events.store'), $payload),
         'invalid' => $this->withHeaders(scheduleEventHeaders('tok_'.bin2hex(random_bytes(32))))
             ->postJson(route('schedule-events.store'), $payload),
+        'missing-with-invalid-payload' => $this->postJson(route('schedule-events.store'), [
+            ...$payload,
+            'output' => 'test-created-probe-before-validation',
+        ]),
         'wrong-purpose' => $this->withHeaders(scheduleEventHeaders($wrongPurpose['secret']))
             ->postJson(route('schedule-events.store'), $payload),
     ];
