@@ -40,7 +40,7 @@
             "@lint:test",
             "@stan",
             "@test",
-            "composer audit --locked --no-interaction"
+            "composer audit --locked --abandoned=report --no-interaction"
         ],
         "lint": "pint",
         "lint:test": "pint --test",
