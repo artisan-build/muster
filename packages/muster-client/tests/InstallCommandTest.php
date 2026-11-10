@@ -486,5 +486,5 @@ it('keeps standalone audit metadata intact', function (): void {
     $root = dirname(__DIR__);
     $composer = json_decode((string) file_get_contents($root.'/composer.json'), true, flags: JSON_THROW_ON_ERROR);
 
-    expect($composer['scripts']['check'])->toContain('composer audit --locked --no-interaction');
+    expect($composer['scripts']['check'])->toContain('composer audit --locked --abandoned=report --no-interaction');
 });
